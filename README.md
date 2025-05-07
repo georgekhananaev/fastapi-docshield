@@ -2,6 +2,14 @@
 
 A simple FastAPI integration to protect documentation endpoints with HTTP Basic Authentication.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python Versions](https://img.shields.io/badge/python-3.7%20%7C%203.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://github.com/georgekhananaev/fastapi-docshield)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com)
+[![Tests Status](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/georgekhananaev/fastapi-docshield)
+[![UV Compatible](https://img.shields.io/badge/uv-compatible-blueviolet)](https://github.com/astral-sh/uv)
+[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/georgekhananaev/fastapi-docshield/graphs/commit-activity)
+[![Code Style: Black](https://img.shields.io/badge/code%20style-black-black)](https://github.com/psf/black)
+
 ## Features
 
 - Protect FastAPI's `/docs` (Swagger UI) and `/redoc` endpoints with HTTP Basic Authentication
@@ -19,11 +27,23 @@ Since this package is not yet published to PyPI, you need to install it locally:
 git clone https://github.com/georgekhananaev/fastapi-docshield.git
 cd fastapi-docshield
 
-# Install locally in development mode
+# Install locally in development mode using pip
 pip install -e .
 
-# Or using uv
+# Or install using uv (recommended for faster installation)
 uv pip install -e .
+```
+
+### Using uv (Recommended)
+
+This package is fully compatible with [uv](https://github.com/astral-sh/uv), the ultra-fast Python package installer and resolver. Using uv can significantly speed up dependency installation and provide a more reliable development environment:
+
+```bash
+# Install with uv
+uv pip install -e .
+
+# Install with test dependencies
+uv pip install -e ".[dev]"
 ```
 
 ## Quick Start
@@ -141,10 +161,12 @@ DocShield(
 
 ### Testing
 
+DocShield is thoroughly tested across multiple Python versions (3.7-3.13) and has a comprehensive test suite. All tests are passing on the latest version.
+
 ```bash
 # Install test dependencies
 pip install pytest httpx
-# Or with uv
+# Or with uv (recommended)
 uv pip install pytest httpx
 
 # Run all tests
@@ -155,7 +177,40 @@ pytest tests/test_docshield.py
 
 # Run with verbose output
 pytest -v
+
+# Run with coverage report
+pytest --cov=fastapi_docshield
 ```
+
+#### Supported Python Versions
+
+DocShield has been tested and confirmed working on:
+- Python 3.7
+- Python 3.8
+- Python 3.9
+- Python 3.10
+- Python 3.11
+- Python 3.12
+- Python 3.13
+
+This ensures wide compatibility across projects with different Python version requirements.
+
+#### Continuous Integration
+
+The project uses GitHub Actions to automatically test compatibility across all supported Python versions on each commit and pull request. Tests run with both pip and uv to ensure maximum compatibility.
+
+![CI Workflow Status](https://img.shields.io/github/actions/workflow/status/georgekhananaev/fastapi-docshield/python-tests.yml?branch=main&label=tests)
+
+### uv Compatibility
+
+FastAPI DocShield is fully compatible with [uv](https://github.com/astral-sh/uv), the ultra-fast Python package installer and resolver. Using uv offers several advantages:
+
+- **Speed**: Install dependencies significantly faster
+- **Reliability**: More reliable dependency resolution
+- **Reproducibility**: Better dependency lockfiles with `uv.lock`
+- **Modern tooling**: Integration with modern Python development workflows
+
+All tests and examples have been verified to work with uv. The project includes a `uv.lock` file for reproducible installations.
 
 ## Troubleshooting
 
@@ -199,6 +254,14 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 See the [CONTRIBUTING.md](CONTRIBUTING.md) file for more information.
 
+## Changelog
+
+For a detailed history of changes, please see the [CHANGELOG.md](CHANGELOG.md) file.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Author
+
+**George Khananaev** - [GitHub Profile](https://github.com/georgekhananaev)

@@ -1,3 +1,11 @@
+"""
+FastAPI DocShield - A simple module to protect FastAPI documentation endpoints with HTTP Basic Auth.
+
+Author: George Khananaev
+License: MIT
+Copyright (c) 2025 George Khananaev
+"""
+
 from typing import Dict, Optional, Tuple
 from fastapi import FastAPI, HTTPException, status, Request, Depends
 from fastapi.security.utils import get_authorization_scheme_param
@@ -13,6 +21,9 @@ class DocShield:
     
     This class allows you to easily secure both /docs (Swagger UI) and /redoc endpoints
     with HTTP Basic Authentication.
+    
+    Author: George Khananaev
+    License: MIT License
     """
     
     def __init__(
