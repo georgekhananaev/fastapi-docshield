@@ -47,6 +47,8 @@ dev = [
 [project.urls]
 "Homepage" = "https://github.com/georgekhananaev/fastapi-docshield"
 "Bug Tracker" = "https://github.com/georgekhananaev/fastapi-docshield/issues"
+"Documentation" = "https://github.com/georgekhananaev/fastapi-docshield#readme"
+"Source Code" = "https://github.com/georgekhananaev/fastapi-docshield"
 
 [tool.hatch.build.targets.wheel]
 packages = ["fastapi_docshield"]

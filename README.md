@@ -2,13 +2,13 @@
 
 A simple FastAPI integration to protect documentation endpoints with HTTP Basic Authentication.
 
+[![PyPI version](https://badge.fury.io/py/fastapi-docshield.svg)](https://badge.fury.io/py/fastapi-docshield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Versions](https://img.shields.io/badge/python-3.7%20%7C%203.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://github.com/georgekhananaev/fastapi-docshield)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com)
 [![Tests Status](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/georgekhananaev/fastapi-docshield)
 [![UV Compatible](https://img.shields.io/badge/uv-compatible-blueviolet)](https://github.com/astral-sh/uv)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/georgekhananaev/fastapi-docshield/graphs/commit-activity)
-[![Code Style: Black](https://img.shields.io/badge/code%20style-black-black)](https://github.com/psf/black)
 
 ## Features
 
@@ -20,17 +20,29 @@ A simple FastAPI integration to protect documentation endpoints with HTTP Basic 
 
 ## Installation
 
-Since this package is not yet published to PyPI, you need to install it locally:
+### From PyPI (Recommended)
+
+```bash
+# Install with pip
+pip install fastapi-docshield
+
+# Or install with uv (recommended for faster installation)
+uv pip install fastapi-docshield
+```
+
+### From Source
+
+You can also install the package directly from the source code:
 
 ```bash
 # Clone the repository
 git clone https://github.com/georgekhananaev/fastapi-docshield.git
 cd fastapi-docshield
 
-# Install locally in development mode using pip
+# Install in development mode using pip
 pip install -e .
 
-# Or install using uv (recommended for faster installation)
+# Or using uv (recommended for faster installation)
 uv pip install -e .
 ```
 
@@ -194,12 +206,6 @@ DocShield has been tested and confirmed working on:
 - Python 3.13
 
 This ensures wide compatibility across projects with different Python version requirements.
-
-#### Continuous Integration
-
-The project uses GitHub Actions to automatically test compatibility across all supported Python versions on each commit and pull request. Tests run with both pip and uv to ensure maximum compatibility.
-
-![CI Workflow Status](https://img.shields.io/github/actions/workflow/status/georgekhananaev/fastapi-docshield/python-tests.yml?branch=main&label=tests)
 
 ### uv Compatibility
 
