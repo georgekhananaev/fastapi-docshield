@@ -57,6 +57,9 @@ class DocShield:
         self.docs_url = docs_url
         self.redoc_url = redoc_url
         self.openapi_url = openapi_url
+        self.swagger_js_url = swagger_js_url
+        self.swagger_css_url = swagger_css_url
+        self.redoc_js_url = redoc_js_url
         
         # Store original endpoints
         self.original_docs_url = app.docs_url
@@ -72,11 +75,7 @@ class DocShield:
         app.openapi_url = None
         
         # Set up protected documentation routes
-        self._setup_routes(
-            swagger_js_url=swagger_js_url,
-            swagger_css_url=swagger_css_url,
-            redoc_js_url=redoc_js_url
-        )
+        self._setup_routes()
     
     def _remove_existing_docs_routes(self) -> None:
         """
@@ -137,19 +136,11 @@ class DocShield:
             headers={"WWW-Authenticate": "Basic"},
         )
     
-    def _setup_routes(
-        self,
-        swagger_js_url: Optional[str],
-        swagger_css_url: Optional[str],
-        redoc_js_url: Optional[str],
-    ) -> None:
+    def _setup_routes(self) -> None:
         """
         Set up all protected documentation endpoints.
         
-        Args:
-            swagger_js_url: Custom Swagger UI JavaScript URL
-            swagger_css_url: Custom Swagger UI CSS URL
-            redoc_js_url: Custom ReDoc JavaScript URL
+        Uses the stored swagger_js_url, swagger_css_url, and redoc_js_url.
         """
         # Set up OpenAPI JSON endpoint
         @self.app.get(self.openapi_url, include_in_schema=False)
@@ -167,21 +158,27 @@ class DocShield:
             @self.app.get(self.docs_url, include_in_schema=False)
             async def get_docs(credentials: HTTPBasicCredentials = Depends(self.security)):
                 self._verify_credentials(credentials)
-                return get_swagger_ui_html(
-                    openapi_url=self.openapi_url,
-                    title=self.app.title + " - Swagger UI",
-                    oauth2_redirect_url=None,
-                    swagger_js_url=swagger_js_url,
-                    swagger_css_url=swagger_css_url,
-                )
+                # Build parameters, only include custom URLs when provided
+                params = {
+                    "openapi_url": self.openapi_url,
+                    "title": self.app.title + " - Swagger UI",
+                    "oauth2_redirect_url": None,
+                }
+                if self.swagger_js_url is not None:
+                    params["swagger_js_url"] = self.swagger_js_url
+                if self.swagger_css_url is not None:
+                    params["swagger_css_url"] = self.swagger_css_url
+                return get_swagger_ui_html(**params)
         
         # Set up ReDoc endpoint if the original app had it
         if self.original_redoc_url is not None:
             @self.app.get(self.redoc_url, include_in_schema=False)
             async def get_redoc(credentials: HTTPBasicCredentials = Depends(self.security)):
                 self._verify_credentials(credentials)
-                return get_redoc_html(
-                    openapi_url=self.openapi_url,
-                    title=self.app.title + " - ReDoc",
-                    redoc_js_url=redoc_js_url,
-                )
+                params = {
+                    "openapi_url": self.openapi_url,
+                    "title": self.app.title + " - ReDoc",
+                }
+                if self.redoc_js_url is not None:
+                    params["redoc_js_url"] = self.redoc_js_url
+                return get_redoc_html(**params)
