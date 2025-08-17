@@ -4,6 +4,21 @@ Examples of using custom CSS and JavaScript with DocShield.
 This module demonstrates various ways to customize the appearance
 and behavior of your protected documentation pages.
 
+How to run:
+-----------
+1. With uvicorn (default dark theme):
+   uvicorn custom_styling:app --reload
+
+2. Run specific themes directly:
+   python custom_styling.py dark      # Dark theme with gradient
+   python custom_styling.py minimal   # Clean minimal theme  
+   python custom_styling.py corporate # Corporate theme with analytics
+   python custom_styling.py redoc     # ReDoc customization
+
+Credentials for all examples:
+   Username: demo
+   Password: style123
+
 Author: George Khananaev
 """
 
@@ -85,7 +100,7 @@ def dark_theme_example():
     
     DocShield(
         app=app,
-        credentials={"admin": "darkmode123"},
+        credentials={"demo": "style123"},
         custom_css=custom_css,
         custom_js=custom_js
     )
@@ -93,7 +108,7 @@ def dark_theme_example():
     print("=" * 70)
     print("Dark Theme Example")
     print("Access at: http://localhost:8000/docs")
-    print("Credentials: admin/darkmode123")
+    print("Credentials: demo/style123")
     print("=" * 70)
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
@@ -205,7 +220,7 @@ def minimal_theme_example():
     
     DocShield(
         app=app,
-        credentials={"viewer": "minimal123"},
+        credentials={"demo": "style123"},
         custom_css=custom_css,
         custom_js=custom_js
     )
@@ -213,7 +228,7 @@ def minimal_theme_example():
     print("=" * 70)
     print("Minimal Theme Example")
     print("Access at: http://localhost:8001/docs")
-    print("Credentials: viewer/minimal123")
+    print("Credentials: demo/style123")
     print("=" * 70)
     
     uvicorn.run(app, host="0.0.0.0", port=8001)
@@ -363,11 +378,7 @@ def corporate_theme_example():
     
     DocShield(
         app=app,
-        credentials={
-            "admin": "corp@2025",
-            "developer": "dev@2025",
-            "auditor": "audit@2025"
-        },
+        credentials={"demo": "style123"},
         custom_css=custom_css,
         custom_js=custom_js
     )
@@ -375,7 +386,7 @@ def corporate_theme_example():
     print("=" * 70)
     print("Corporate Theme Example")
     print("Access at: http://localhost:8002/docs")
-    print("Credentials: admin/corp@2025, developer/dev@2025, or auditor/audit@2025")
+    print("Credentials: demo/style123")
     print("Features: Usage analytics, corporate branding, compliance notices")
     print("=" * 70)
     
@@ -483,7 +494,7 @@ def redoc_custom_example():
     
     DocShield(
         app=app,
-        credentials={"user": "redoc123"},
+        credentials={"demo": "style123"},
         custom_css=custom_css,
         custom_js=custom_js,
         prefer_local=True  # Use local files for faster loading
@@ -492,12 +503,79 @@ def redoc_custom_example():
     print("=" * 70)
     print("ReDoc Custom Example")
     print("Access at: http://localhost:8003/redoc")
-    print("Credentials: user/redoc123")
+    print("Credentials: demo/style123")
     print("Features: Reading progress, copy buttons, custom styling")
     print("=" * 70)
     
     uvicorn.run(app, host="0.0.0.0", port=8003)
 
+
+# Create a default app for uvicorn
+# This will be used when running: uvicorn custom_styling:app
+app = FastAPI(
+    title="Custom Styling Examples",
+    description="Examples of DocShield with custom CSS and JavaScript",
+    version="1.0.0"
+)
+
+@app.get("/")
+def root():
+    return {
+        "message": "DocShield Custom Styling Examples",
+        "examples": [
+            "python custom_styling.py dark",
+            "python custom_styling.py minimal", 
+            "python custom_styling.py corporate",
+            "python custom_styling.py redoc"
+        ]
+    }
+
+@app.get("/examples")
+def list_examples():
+    return {
+        "dark": "Dark theme with gradient backgrounds",
+        "minimal": "Clean minimal theme",
+        "corporate": "Corporate theme with analytics",
+        "redoc": "ReDoc customization example"
+    }
+
+# Apply dark theme by default to the app
+custom_css = """
+/* Dark theme customization */
+.swagger-ui {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.swagger-ui .topbar {
+    background-color: #1a1a2e;
+    border-bottom: 2px solid #764ba2;
+}
+
+.swagger-ui .btn.authorize {
+    background-color: #764ba2;
+    border-color: #764ba2;
+}
+"""
+
+custom_js = """
+console.log('🎨 Custom Styling Examples - Default Dark Theme');
+document.addEventListener('DOMContentLoaded', function() {
+    const info = document.querySelector('.info');
+    if (info) {
+        const note = document.createElement('div');
+        note.style.cssText = 'background:#764ba2;color:white;padding:15px;margin-bottom:20px;border-radius:5px;';
+        note.innerHTML = '📝 Note: Run with different themes using: python custom_styling.py [dark|minimal|corporate|redoc]';
+        info.insertBefore(note, info.firstChild);
+    }
+});
+"""
+
+DocShield(
+    app=app,
+    credentials={"demo": "style123"},
+    custom_css=custom_css,
+    custom_js=custom_js
+)
 
 if __name__ == "__main__":
     import sys

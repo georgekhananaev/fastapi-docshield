@@ -6,14 +6,14 @@ License: MIT
 Copyright (c) 2025 George Khananaev
 """
 
-from typing import Dict, Optional, Tuple
-from fastapi import FastAPI, HTTPException, status, Request, Depends
-from fastapi.security.utils import get_authorization_scheme_param
+__version__ = "0.2.1"
+
+from typing import Dict, Optional
+from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import HTMLResponse
 import secrets
-import base64
 from .static_handler import StaticHandler
 
 
@@ -67,6 +67,9 @@ class DocShield:
         self.docs_url = docs_url
         self.redoc_url = redoc_url
         self.openapi_url = openapi_url
+        self.swagger_js_url = swagger_js_url
+        self.swagger_css_url = swagger_css_url
+        self.redoc_js_url = redoc_js_url
         self.use_cdn_fallback = use_cdn_fallback
         self.prefer_local = prefer_local
         self.custom_css = custom_css
@@ -89,11 +92,7 @@ class DocShield:
         app.openapi_url = None
         
         # Set up protected documentation routes
-        self._setup_routes(
-            swagger_js_url=swagger_js_url,
-            swagger_css_url=swagger_css_url,
-            redoc_js_url=redoc_js_url
-        )
+        self._setup_routes()
     
     def _remove_existing_docs_routes(self) -> None:
         """
@@ -108,12 +107,18 @@ class DocShield:
         for route in self.app.routes:
             path = getattr(route, "path", "")
             
-            # Skip documentation routes
-            if (path == self.docs_url or 
+            # Skip both original and new documentation routes
+            if (path == self.original_docs_url or 
+                path == self.original_redoc_url or 
+                path == self.original_openapi_url or
+                path == self.docs_url or 
                 path == self.redoc_url or 
                 path == self.openapi_url or
-                path.startswith(f"{self.docs_url}/") or  # Docs static files
-                path == "/openapi.json"):
+                path == "/docs" or  # Default docs
+                path == "/redoc" or  # Default redoc
+                path == "/openapi.json" or  # Default openapi
+                path.startswith("/docs/") or  # Docs static files
+                path.startswith(f"{self.docs_url}/")):  # New docs static files
                 continue
                 
             routes_to_keep.append(route)
@@ -154,19 +159,11 @@ class DocShield:
             headers={"WWW-Authenticate": "Basic"},
         )
     
-    def _setup_routes(
-        self,
-        swagger_js_url: Optional[str],
-        swagger_css_url: Optional[str],
-        redoc_js_url: Optional[str],
-    ) -> None:
+    def _setup_routes(self) -> None:
         """
         Set up all protected documentation endpoints.
         
-        Args:
-            swagger_js_url: Custom Swagger UI JavaScript URL
-            swagger_css_url: Custom Swagger UI CSS URL
-            redoc_js_url: Custom ReDoc JavaScript URL
+        Uses the stored swagger_js_url, swagger_css_url, and redoc_js_url.
         """
         # Set up OpenAPI JSON endpoint
         @self.app.get(self.openapi_url, include_in_schema=False)
@@ -186,16 +183,16 @@ class DocShield:
                 self._verify_credentials(credentials)
                 
                 # Determine which URLs to use
-                if swagger_js_url is not None or swagger_css_url is not None:
+                if self.swagger_js_url is not None or self.swagger_css_url is not None:
                     # User provided custom URLs, use them
                     kwargs = {
                         "openapi_url": self.openapi_url,
                         "title": self.app.title + " - Swagger UI",
                     }
-                    if swagger_js_url is not None:
-                        kwargs["swagger_js_url"] = swagger_js_url
-                    if swagger_css_url is not None:
-                        kwargs["swagger_css_url"] = swagger_css_url
+                    if self.swagger_js_url is not None:
+                        kwargs["swagger_js_url"] = self.swagger_js_url
+                    if self.swagger_css_url is not None:
+                        kwargs["swagger_css_url"] = self.swagger_css_url
                 elif self.static_handler and self.prefer_local:
                     # Prefer local files
                     js_url, css_url = self.static_handler.get_swagger_urls(prefer_local=True)
@@ -229,12 +226,12 @@ class DocShield:
                 self._verify_credentials(credentials)
                 
                 # Determine which URL to use
-                if redoc_js_url is not None:
+                if self.redoc_js_url is not None:
                     # User provided custom URL, use it
                     kwargs = {
                         "openapi_url": self.openapi_url,
                         "title": self.app.title + " - ReDoc",
-                        "redoc_js_url": redoc_js_url,
+                        "redoc_js_url": self.redoc_js_url,
                     }
                 elif self.static_handler and self.prefer_local:
                     # Prefer local files

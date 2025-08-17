@@ -9,9 +9,9 @@ License: MIT License
 Copyright (c) 2025 George Khananaev
 """
 
-from .docshield import DocShield
+from .docshield import DocShield, __version__
 
-__version__ = "0.2.0"
+__version__ = __version__
 __author__ = "George Khananaev"
 __license__ = "MIT"
 __copyright__ = "Copyright (c) 2025 George Khananaev"

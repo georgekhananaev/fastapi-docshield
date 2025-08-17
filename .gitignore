@@ -71,3 +71,6 @@ dmypy.json
 # OS specific files
 .DS_Store
 **/.claude/settings.local.json
+
+# Claude Code memory file
+CLAUDE.md

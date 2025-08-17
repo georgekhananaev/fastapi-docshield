@@ -1,5 +1,5 @@
 """
-Comprehensive example showcasing all DocShield v0.2.0 features.
+Comprehensive example showcasing all DocShield v0.2.1 features.
 
 This example demonstrates:
 - Multiple user credentials
@@ -22,7 +22,7 @@ from datetime import datetime
 # Create FastAPI app with comprehensive API
 app = FastAPI(
     title="DocShield Feature Showcase",
-    description="Demonstrating all features of FastAPI DocShield v0.2.0",
+    description="Demonstrating all features of FastAPI DocShield v0.2.1",
     version="2.0.0"
 )
 
@@ -349,7 +349,7 @@ if __name__ == "__main__":
     import uvicorn
     
     print("=" * 80)
-    print("🛡️  DocShield v0.2.0 - All Features Showcase")
+    print("🛡️  DocShield v0.2.1 - All Features Showcase")
     print("=" * 80)
     print()
     print("📍 Server: http://localhost:8000")

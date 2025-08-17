@@ -223,6 +223,20 @@ pytest --cov=fastapi_docshield
 
 ## Changelog
 
+### Version 0.2.1 (2025-08-17)
+- **Fixed**: Blank page issue after authentication for some users
+  - Improved handling of custom URL parameters by storing them as instance variables
+  - Simplified `_setup_routes()` method for better maintainability
+  - Applied fix from PR #2 for more robust URL parameter handling
+- **Fixed**: Route removal logic now correctly removes all default documentation routes
+  - Properly removes `/docs`, `/redoc`, and `/openapi.json` endpoints
+  - Prevents 500 errors when accessing old endpoints
+- **Improved**: Example files and documentation
+  - Fixed `custom_styling.py` to work with uvicorn by adding default app variable
+  - Standardized credentials across all custom styling examples
+  - Added `python-multipart` to dev dependencies for form data handling
+  - Added clear run instructions in example files
+
 ### Version 0.2.0 (2025-08-17)
 - **Added**: Custom CSS and JavaScript injection support
   - New `custom_css` parameter to inject custom styles into documentation pages
