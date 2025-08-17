@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fastapi-docshield"
-version = "0.1.0"
+version = "0.2.0"
 description = "A simple FastAPI integration to protect documentation endpoints with authentication"
 readme = "README.md"
 requires-python = ">=3.7"
@@ -52,3 +52,12 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["fastapi_docshield"]
+
+[tool.hatch.build.targets.wheel.sources]
+"fastapi_docshield" = "fastapi_docshield"
+
+[tool.hatch.build]
+include = [
+    "fastapi_docshield/**/*.py",
+    "fastapi_docshield/static/**/*",
+]

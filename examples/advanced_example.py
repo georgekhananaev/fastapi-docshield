@@ -54,20 +54,35 @@ async def read_users_me(token: str = Depends(oauth2_scheme)):
     user = fake_users_db[token]
     return user
 
-# Protect the docs with DocShield - using custom URLs and UI resources
+# Protect the docs with DocShield - showcasing various features
 DocShield(
     app=app,
     credentials={
         "admin": "admin123",  # Credentials for accessing the docs
+        "dev": "dev456"       # Multiple users supported
     },
     docs_url="/api/docs",              # Custom docs URL 
     redoc_url="/api/redoc",            # Custom redoc URL
     openapi_url="/api/openapi.json",   # Custom OpenAPI JSON URL
     
-    # Optional: custom Swagger UI and ReDoc resources
-    swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
-    swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
-    redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"
+    # New in v0.2.0: CDN fallback options
+    use_cdn_fallback=True,  # Automatically fallback to local files if CDN fails (default: True)
+    prefer_local=False,     # Set to True to always use local files instead of CDN
+    
+    # New in v0.2.0: Custom CSS and JavaScript injection
+    custom_css="""
+        /* Custom branding example */
+        .swagger-ui .topbar { 
+            background-color: #2c3e50; 
+        }
+        .swagger-ui .topbar .download-url-wrapper { 
+            display: none; 
+        }
+    """,
+    custom_js="""
+        console.log('Advanced API Documentation Loaded');
+        // Add custom functionality here
+    """
 )
 
 # Run with: uvicorn advanced_example:app --reload

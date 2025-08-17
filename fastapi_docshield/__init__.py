@@ -11,7 +11,7 @@ Copyright (c) 2025 George Khananaev
 
 from .docshield import DocShield
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "George Khananaev"
 __license__ = "MIT"
 __copyright__ = "Copyright (c) 2025 George Khananaev"
