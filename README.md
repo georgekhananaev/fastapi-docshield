@@ -155,9 +155,48 @@ DocShield(
 )
 ```
 
-#### Using with fastapi-swagger-dark
+### Using with fastapi-swagger-dark
 
-For a complete dark theme solution, you can use the [fastapi-swagger-dark](https://github.com/georgekhananaev/fastapi-swagger-dark) package:
+You can download .css files from here: https://github.com/georgekhananaev/fastapi-swagger-ui-dark-theme
+
+```python
+from fastapi import FastAPI
+from fastapi_docshield import DocShield
+from pathlib import Path
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"Hello": "World"}
+
+# Load dark theme CSS from local file with error handling
+try:
+    css_path = Path("static/swagger_ui_dark.min.css")
+    with open(css_path, "r", encoding="utf-8") as f:
+        dark_css = f.read()
+    logger.info("Dark theme CSS loaded successfully")
+except FileNotFoundError:
+    logger.warning(f"Dark theme CSS file not found at {css_path}")
+    dark_css = ""  # Fallback to default theme
+except Exception as e:
+    logger.warning(f"Failed to load dark theme CSS - {type(e).__name__}: {str(e)}")
+    dark_css = ""  # Fallback to default theme
+
+# Apply DocShield with dark theme and authentication
+DocShield(
+    app=app,
+    credentials={"admin": "admin123456"},  # Protect with authentication
+    custom_css=dark_css,  # Apply dark theme (falls back to default if loading failed)
+    prefer_local=True  # Use local files for better reliability
+)
+```
+
+#### Alternative: Load from URL
 
 ```python
 from fastapi import FastAPI
@@ -166,16 +205,17 @@ import requests
 
 app = FastAPI()
 
-# Fetch dark theme CSS
-response = requests.get(
-    "https://raw.githubusercontent.com/georgekhananaev/fastapi-swagger-dark/main/src/fastapi_swagger_dark/swagger_ui_dark.min.css"
-)
-dark_css = response.text
+# Fetch dark theme CSS from GitHub
+dark_theme_url = "https://raw.githubusercontent.com/georgekhananaev/fastapi-swagger-ui-dark/main/swagger_ui_dark.min.css"
+dark_css = requests.get(dark_theme_url).text
 
 DocShield(
     app=app,
-    credentials={"admin": "password123"},
-    custom_css=dark_css  # Apply dark theme
+    credentials={
+        "admin": "admin_password",
+        "developer": "dev_password"  # Multiple users supported
+    },
+    custom_css=dark_css
 )
 ```
 
