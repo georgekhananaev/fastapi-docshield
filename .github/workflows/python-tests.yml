@@ -52,8 +52,8 @@ jobs:
         
     - name: Install dependencies with uv
       run: |
-        uv pip install pytest pytest-cov httpx uvicorn
-        uv pip install -e .
+        uv pip install --system pytest pytest-cov httpx uvicorn
+        uv pip install --system -e .
         
     - name: Test with pytest
       run: |
