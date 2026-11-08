@@ -1,4 +1,3 @@
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_docshield import DocShield
@@ -155,11 +154,8 @@ def test_custom_urls():
     headers = get_auth_header("admin", "password123")
     
     # Test that original URLs return 404
-    with pytest.raises(Exception):
-        client.get("/docs")
-        
-    with pytest.raises(Exception):
-        client.get("/redoc")
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
     
     # Custom URLs should work with auth
     response = client.get("/custom-docs", headers=headers)
