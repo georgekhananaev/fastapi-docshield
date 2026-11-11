@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
-    {name = "George Khananaev", email = "georgekhananaev@gmail.com"},
+    {name = "George Khananaev", email = "106206490+georgekhananaev@users.noreply.github.com"},
 ]
 keywords = ["fastapi", "authentication", "documentation", "security"]
 classifiers = [
