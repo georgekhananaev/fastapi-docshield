@@ -1,7 +1,9 @@
+import base64
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from fastapi_docshield import DocShield
-import base64
 
 
 def get_auth_header(username, password):
@@ -17,13 +19,13 @@ def test_docs_protected():
     # Create app with docs enabled
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
-    
+
     shield = DocShield(app=app, credentials={"admin": "password123"})
-    
+
     print(f"In test: app.docs_url = {app.docs_url}")
     print(f"In test: app.redoc_url = {app.redoc_url}")
     print(f"In test: shield.docs_url = {shield.docs_url}")
-    
+
     client = TestClient(app)
     # Request without auth should fail
     response = client.get("/docs")
@@ -40,9 +42,9 @@ def test_redoc_protected():
     # Create app with docs enabled
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
-    
+
     shield = DocShield(app=app, credentials={"admin": "password123"})
-    
+
     client = TestClient(app)
     # Request without auth should fail
     response = client.get("/redoc")
@@ -56,9 +58,9 @@ def test_openapi_protected():
     # Create app with docs enabled
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
-    
+
     shield = DocShield(app=app, credentials={"admin": "password123"})
-    
+
     client = TestClient(app)
     # Request without auth should fail
     response = client.get("/openapi.json")
@@ -72,17 +74,17 @@ def test_valid_credentials():
     # Create app with docs enabled
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
-    
+
     shield = DocShield(app=app, credentials={"admin": "password123"})
-    
+
     client = TestClient(app)
     # Use auth headers directly
     headers = get_auth_header("admin", "password123")
-    
+
     response = client.get("/docs", headers=headers)
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    
+
     response = client.get("/openapi.json", headers=headers)
     assert response.status_code == 200
     assert "application/json" in response.headers["content-type"]
@@ -94,9 +96,9 @@ def test_invalid_credentials():
     # Create app with docs enabled
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
-    
+
     shield = DocShield(app=app, credentials={"admin": "password123"})
-    
+
     client = TestClient(app)
     # Use incorrect password in auth headers
     headers = get_auth_header("admin", "wrongpassword")
@@ -111,19 +113,16 @@ def test_multiple_credentials():
     # Create app with docs enabled
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
-    
-    shield = DocShield(app=app, credentials={
-        "admin": "password123", 
-        "dev": "devpass"
-    })
-    
+
+    shield = DocShield(app=app, credentials={"admin": "password123", "dev": "devpass"})
+
     client = TestClient(app)
-    
+
     # Test first credential pair
     headers1 = get_auth_header("admin", "password123")
     response = client.get("/docs", headers=headers1)
     assert response.status_code == 200
-    
+
     # Test second credential pair
     headers2 = get_auth_header("dev", "devpass")
     response = client.get("/docs", headers=headers2)
@@ -136,33 +135,33 @@ def test_custom_urls():
     # Create app with docs enabled
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
-    
+
     # We need to add a simple route to initialize FastAPI
     @app.get("/")
     def read_root():
         return {"message": "Hello World"}
-    
+
     shield = DocShield(
         app=app,
         credentials={"admin": "password123"},
         docs_url="/custom-docs",
         redoc_url="/custom-redoc",
-        openapi_url="/custom-openapi.json"
+        openapi_url="/custom-openapi.json",
     )
-    
+
     client = TestClient(app)
     headers = get_auth_header("admin", "password123")
-    
+
     # Test that original URLs return 404
     assert client.get("/docs").status_code == 404
     assert client.get("/redoc").status_code == 404
-    
+
     # Custom URLs should work with auth
     response = client.get("/custom-docs", headers=headers)
     assert response.status_code == 200
-    
+
     response = client.get("/custom-redoc", headers=headers)
     assert response.status_code == 200
-    
+
     response = client.get("/custom-openapi.json", headers=headers)
     assert response.status_code == 200

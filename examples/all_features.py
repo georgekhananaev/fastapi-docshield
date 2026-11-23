@@ -13,41 +13,66 @@ Run with:
     uvicorn all_features:app --reload --port 8000
 """
 
-from fastapi import FastAPI, Query
-from fastapi_docshield import DocShield
-from typing import Optional, List
-from pydantic import BaseModel
 from datetime import datetime
+
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
+
+from fastapi_docshield import DocShield
 
 # Create FastAPI app with comprehensive API
 app = FastAPI(
     title="DocShield Feature Showcase",
     description="Demonstrating all features of FastAPI DocShield v0.2.1",
-    version="2.0.0"
+    version="2.0.0",
 )
+
 
 # Define models for the API
 class Item(BaseModel):
     """Item model for the API."""
+
     id: int
     name: str
     price: float
-    description: Optional[str] = None
-    tags: List[str] = []
+    description: str | None = None
+    tags: list[str] = []
+
 
 class ItemCreate(BaseModel):
     """Model for creating new items."""
+
     name: str
     price: float
-    description: Optional[str] = None
-    tags: List[str] = []
+    description: str | None = None
+    tags: list[str] = []
+
 
 # Sample data
 items_db = {
-    1: Item(id=1, name="Laptop", price=999.99, description="High-performance laptop", tags=["electronics", "computers"]),
-    2: Item(id=2, name="Mouse", price=29.99, description="Wireless mouse", tags=["electronics", "accessories"]),
-    3: Item(id=3, name="Keyboard", price=79.99, description="Mechanical keyboard", tags=["electronics", "accessories"])
+    1: Item(
+        id=1,
+        name="Laptop",
+        price=999.99,
+        description="High-performance laptop",
+        tags=["electronics", "computers"],
+    ),
+    2: Item(
+        id=2,
+        name="Mouse",
+        price=29.99,
+        description="Wireless mouse",
+        tags=["electronics", "accessories"],
+    ),
+    3: Item(
+        id=3,
+        name="Keyboard",
+        price=79.99,
+        description="Mechanical keyboard",
+        tags=["electronics", "accessories"],
+    ),
 }
+
 
 # API Routes
 @app.get("/", tags=["General"])
@@ -59,33 +84,37 @@ def root():
             "authentication": "Multiple users supported",
             "cdn_fallback": "Automatic fallback to local files",
             "customization": "Custom CSS and JavaScript injection",
-            "urls": "Custom documentation URLs"
+            "urls": "Custom documentation URLs",
         },
         "docs": "/secure/docs",
-        "redoc": "/secure/redoc"
+        "redoc": "/secure/redoc",
     }
 
-@app.get("/items", response_model=List[Item], tags=["Items"])
+
+@app.get("/items", response_model=list[Item], tags=["Items"])
 def list_items(
     skip: int = Query(0, description="Number of items to skip"),
     limit: int = Query(10, description="Number of items to return"),
-    tag: Optional[str] = Query(None, description="Filter by tag")
+    tag: str | None = Query(None, description="Filter by tag"),
 ):
     """List all items with optional filtering."""
     items = list(items_db.values())
-    
+
     if tag:
         items = [item for item in items if tag in item.tags]
-    
-    return items[skip:skip + limit]
+
+    return items[skip : skip + limit]
+
 
 @app.get("/items/{item_id}", response_model=Item, tags=["Items"])
 def get_item(item_id: int):
     """Get a specific item by ID."""
     if item_id not in items_db:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Item not found")
     return items_db[item_id]
+
 
 @app.post("/items", response_model=Item, tags=["Items"])
 def create_item(item: ItemCreate):
@@ -95,26 +124,31 @@ def create_item(item: ItemCreate):
     items_db[new_id] = new_item
     return new_item
 
+
 @app.put("/items/{item_id}", response_model=Item, tags=["Items"])
 def update_item(item_id: int, item: ItemCreate):
     """Update an existing item."""
     if item_id not in items_db:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Item not found")
-    
+
     updated_item = Item(id=item_id, **item.dict())
     items_db[item_id] = updated_item
     return updated_item
+
 
 @app.delete("/items/{item_id}", tags=["Items"])
 def delete_item(item_id: int):
     """Delete an item."""
     if item_id not in items_db:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Item not found")
-    
+
     del items_db[item_id]
     return {"message": "Item deleted successfully"}
+
 
 @app.get("/stats", tags=["Analytics"])
 def get_stats():
@@ -122,9 +156,12 @@ def get_stats():
     return {
         "total_items": len(items_db),
         "total_value": sum(item.price for item in items_db.values()),
-        "average_price": sum(item.price for item in items_db.values()) / len(items_db) if items_db else 0,
-        "timestamp": datetime.now().isoformat()
+        "average_price": sum(item.price for item in items_db.values()) / len(items_db)
+        if items_db
+        else 0,
+        "timestamp": datetime.now().isoformat(),
     }
+
 
 # Custom CSS for professional styling
 custom_css = """
@@ -228,7 +265,7 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         info.insertBefore(banner, info.firstChild);
     }
-    
+
     // Add statistics dashboard
     const statsDiv = document.createElement('div');
     statsDiv.id = 'stats-dashboard';
@@ -252,13 +289,13 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
     `;
     document.body.appendChild(statsDiv);
-    
+
     // Update session timer
     setInterval(function() {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         const minutes = Math.floor(elapsed / 60);
         const seconds = elapsed % 60;
-        document.getElementById('session-time').textContent = 
+        document.getElementById('session-time').textContent =
             `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }, 1000);
 });
@@ -268,13 +305,13 @@ document.addEventListener('click', function(e) {
     if (e.target.closest('.opblock-summary')) {
         operationClicks++;
         document.getElementById('op-count').textContent = operationClicks;
-        
+
         const operation = e.target.closest('.opblock');
         const method = operation.className.match(/opblock-(\\w+)/)[1];
         const path = operation.querySelector('.opblock-summary-path').textContent;
-        
+
         console.log(`📍 Operation clicked: ${method.toUpperCase()} ${path}`);
-        
+
         // Show tooltip after 5 clicks
         if (operationClicks === 5) {
             const tooltip = document.createElement('div');
@@ -321,33 +358,28 @@ window.addEventListener('beforeunload', function() {
 DocShield(
     app=app,
     credentials={
-        "admin": "admin@2025",      # Admin access
-        "developer": "dev@2025",     # Developer access
-        "viewer": "view@2025",       # Read-only access
-        "tester": "test@2025"        # Tester access
+        "admin": "admin@2025",  # Admin access
+        "developer": "dev@2025",  # Developer access
+        "viewer": "view@2025",  # Read-only access
+        "tester": "test@2025",  # Tester access
     },
-    
     # Custom URLs for documentation
     docs_url="/secure/docs",
-    redoc_url="/secure/redoc", 
+    redoc_url="/secure/redoc",
     openapi_url="/secure/openapi.json",
-    
     # CDN with automatic fallback (default: True)
     use_cdn_fallback=True,
-    
     # Set to True to always use local files instead of CDN
     prefer_local=False,
-    
     # Apply custom styling
     custom_css=custom_css,
-    
     # Apply custom JavaScript
-    custom_js=custom_js
+    custom_js=custom_js,
 )
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     print("=" * 80)
     print("🛡️  DocShield v0.2.1 - All Features Showcase")
     print("=" * 80)
@@ -375,5 +407,5 @@ if __name__ == "__main__":
     print("   ✅ Keyboard shortcuts (Ctrl+K for search)")
     print()
     print("=" * 80)
-    
+
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

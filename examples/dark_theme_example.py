@@ -1,23 +1,25 @@
 """
 Example showing how to use DocShield with fastapi-swagger-dark theme.
 
-This example demonstrates how to integrate DocShield with the 
+This example demonstrates how to integrate DocShield with the
 fastapi-swagger-dark package for a complete dark theme solution.
 
 Run with:
     uvicorn dark_theme_example:app --reload
 """
 
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
 import requests
+from fastapi import FastAPI
+
+from fastapi_docshield import DocShield
 
 # Create FastAPI app
 app = FastAPI(
     title="Dark Theme API",
     description="API with dark theme documentation from fastapi-swagger-dark",
-    version="1.0.0"
+    version="1.0.0",
 )
+
 
 # Add some routes
 @app.get("/")
@@ -25,23 +27,28 @@ def read_root():
     """Return a welcome message."""
     return {"message": "Dark theme API with protected documentation"}
 
+
 @app.get("/items/{item_id}")
 def read_item(item_id: int, q: str = None):
     """Get an item by ID."""
     return {"item_id": item_id, "q": q}
+
 
 @app.post("/items/")
 def create_item(name: str, price: float):
     """Create a new item."""
     return {"name": name, "price": price}
 
+
 # Fetch dark theme CSS from fastapi-swagger-dark repository
 try:
     dark_theme_response = requests.get(
         "https://raw.githubusercontent.com/georgekhananaev/fastapi-swagger-dark/main/src/fastapi_swagger_dark/swagger_ui_dark.min.css",
-        timeout=5
+        timeout=5,
     )
-    dark_css = dark_theme_response.text if dark_theme_response.status_code == 200 else None
+    dark_css = (
+        dark_theme_response.text if dark_theme_response.status_code == 200 else None
+    )
 except:
     dark_css = None
     print("Warning: Could not fetch dark theme CSS, using default theme")
@@ -61,7 +68,7 @@ document.addEventListener('DOMContentLoaded', function() {
         banner.innerHTML = '🔒 Protected Documentation with Dark Theme';
         info.insertBefore(banner, info.firstChild);
     }
-    
+
     // Log API operations when clicked
     document.addEventListener('click', function(e) {
         if (e.target.closest('.opblock-summary')) {
@@ -77,24 +84,18 @@ document.addEventListener('DOMContentLoaded', function() {
 # Apply DocShield with dark theme
 DocShield(
     app=app,
-    credentials={
-        "admin": "darkadmin",
-        "developer": "darkdev"
-    },
-    
+    credentials={"admin": "darkadmin", "developer": "darkdev"},
     # Use CDN with fallback for reliability
     use_cdn_fallback=True,
-    
     # Apply dark theme CSS if available
     custom_css=dark_css if dark_css else "",
-    
     # Add custom JavaScript
-    custom_js=custom_js
+    custom_js=custom_js,
 )
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     print("=" * 70)
     print("🌙 Dark Theme API with DocShield")
     print("=" * 70)
@@ -111,5 +112,5 @@ if __name__ == "__main__":
     else:
         print("⚠️  Using default theme (dark theme CSS not loaded)")
     print("=" * 70)
-    
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
