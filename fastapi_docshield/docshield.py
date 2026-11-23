@@ -23,7 +23,8 @@ from .static_handler import StaticHandler
 
 class DocShield:
     """
-    DocShield provides authentication protection for FastAPI's built-in documentation endpoints.
+    DocShield provides authentication protection for FastAPI's
+    built-in documentation endpoints.
 
     This class allows you to easily secure both /docs (Swagger UI) and /redoc endpoints
     with HTTP Basic Authentication.
@@ -175,7 +176,8 @@ class DocShield:
 
     @staticmethod
     def _collect_schema_refs(obj: Any, refs: set[str]) -> None:
-        """Recursively collect all referenced component schema names from an OpenAPI object."""
+        """Recursively collect all referenced component schema names
+        from an OpenAPI object."""
         if isinstance(obj, dict):
             ref = obj.get("$ref")
             if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
@@ -232,7 +234,8 @@ class DocShield:
 
         filtered_schema["paths"] = filtered_paths
 
-        # 2. Prune components.schemas to only models referenced by visible paths (including nested refs)
+        # 2. Prune components.schemas to only models referenced by visible paths
+        # (including nested refs)
         components = filtered_schema.get("components")
         if isinstance(components, dict) and isinstance(components.get("schemas"), dict):
             all_schemas = components["schemas"]
