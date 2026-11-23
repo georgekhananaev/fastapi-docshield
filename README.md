@@ -76,6 +76,37 @@ DocShield(
 )
 ```
 
+### Role-Based Route Filtering (`user_tags`)
+
+Restrict which routes and Pydantic schemas each user sees in Swagger UI, ReDoc, and `/openapi.json` by mapping usernames to allowed FastAPI route `tags`. Users omitted from `user_tags` or mapped to `None` retain full access.
+
+```python
+from fastapi import FastAPI
+from fastapi_docshield import DocShield
+
+app = FastAPI()
+
+@app.get("/", tags=["general"])
+def read_root():
+    return {"Hello": "World"}
+
+@app.post("/posts/{id}", tags=["admin"])
+def create_post(id: int):
+    return {"id": id}
+
+DocShield(
+    app=app,
+    credentials={
+        "admin": "admin_password",
+        "developer": "dev_password",
+    },
+    user_tags={
+        "admin": None,            # Sees all routes and schemas
+        "developer": ["general"], # Sees only routes tagged "general" and their schemas
+    },
+)
+```
+
 ### CDN Fallback Mode (Default)
 
 ```python

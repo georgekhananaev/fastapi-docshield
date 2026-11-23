@@ -8,7 +8,10 @@ Copyright (c) 2025 George Khananaev
 
 __version__ = "0.2.1"
 
+import copy
 import secrets
+from collections.abc import Iterable
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
@@ -43,6 +46,7 @@ class DocShield:
         prefer_local: bool = False,
         custom_css: str | None = None,
         custom_js: str | None = None,
+        user_tags: dict[str, Iterable[str] | None] | None = None,
     ):
         """
         Initialize DocShield with the given FastAPI application and credentials.
@@ -60,6 +64,7 @@ class DocShield:
             prefer_local: Prefer local static files over CDN
             custom_css: Custom CSS to inject into documentation pages
             custom_js: Custom JavaScript to inject into documentation pages
+            user_tags: Optional dictionary of user-defined tags for documentation
         """
         # Initialize security scheme
         self.security = HTTPBasic()
@@ -75,6 +80,10 @@ class DocShield:
         self.prefer_local = prefer_local
         self.custom_css = custom_css
         self.custom_js = custom_js
+        self.user_tags: dict[str, set[str] | None] = {
+            user: (set(tags) if tags is not None else None)
+            for user, tags in (user_tags or {}).items()
+        }
 
         # Initialize static handler if fallback is enabled
         self.static_handler = (
@@ -164,6 +173,96 @@ class DocShield:
             headers={"WWW-Authenticate": "Basic"},
         )
 
+    @staticmethod
+    def _collect_schema_refs(obj: Any, refs: set[str]) -> None:
+        """Recursively collect all referenced component schema names from an OpenAPI object."""
+        if isinstance(obj, dict):
+            ref = obj.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+                refs.add(ref.split("/")[-1])
+            for value in obj.values():
+                DocShield._collect_schema_refs(value, refs)
+        elif isinstance(obj, list):
+            for item in obj:
+                DocShield._collect_schema_refs(item, refs)
+
+    def _filter_openapi_schema(
+        self, schema: dict[str, Any], username: str
+    ) -> dict[str, Any]:
+        """
+        Filter OpenAPI paths, component schemas, and top-level tags for a user.
+        Users omitted from user_tags or mapped to None receive the full schema.
+        """
+        allowed_tags = self.user_tags.get(username)
+        if allowed_tags is None:
+            return schema
+
+        # Deep copy so we never mutate FastAPI's cached app.openapi() schema
+        filtered_schema = copy.deepcopy(schema)
+        http_methods = {
+            "get",
+            "put",
+            "post",
+            "delete",
+            "options",
+            "head",
+            "patch",
+            "trace",
+        }
+
+        # 1. Filter paths by allowed tags (untagged routes are excluded)
+        filtered_paths: dict[str, Any] = {}
+        for path, path_item in filtered_schema.get("paths", {}).items():
+            if not isinstance(path_item, dict):
+                continue
+
+            allowed_operations = {}
+            non_operation_fields = {}
+
+            for key, value in path_item.items():
+                if key.lower() in http_methods and isinstance(value, dict):
+                    route_tags = set(value.get("tags", []))
+                    if route_tags & allowed_tags:
+                        allowed_operations[key] = value
+                else:
+                    non_operation_fields[key] = value
+
+            if allowed_operations:
+                filtered_paths[path] = {**non_operation_fields, **allowed_operations}
+
+        filtered_schema["paths"] = filtered_paths
+
+        # 2. Prune components.schemas to only models referenced by visible paths (including nested refs)
+        components = filtered_schema.get("components")
+        if isinstance(components, dict) and isinstance(components.get("schemas"), dict):
+            all_schemas = components["schemas"]
+            pending: set[str] = set()
+            self._collect_schema_refs(filtered_paths, pending)
+
+            used_schemas: set[str] = set()
+            while pending:
+                schema_name = pending.pop()
+                if schema_name in used_schemas or schema_name not in all_schemas:
+                    continue
+                used_schemas.add(schema_name)
+                self._collect_schema_refs(all_schemas[schema_name], pending)
+
+            components["schemas"] = {
+                name: definition
+                for name, definition in all_schemas.items()
+                if name in used_schemas
+            }
+
+        # 3. Filter top-level tags metadata if present
+        if "tags" in filtered_schema and isinstance(filtered_schema["tags"], list):
+            filtered_schema["tags"] = [
+                tag
+                for tag in filtered_schema["tags"]
+                if isinstance(tag, dict) and tag.get("name") in allowed_tags
+            ]
+
+        return filtered_schema
+
     def _setup_routes(self) -> None:
         """
         Set up all protected documentation endpoints.
@@ -176,13 +275,13 @@ class DocShield:
         async def get_openapi(
             credentials: HTTPBasicCredentials = Depends(self.security),
         ):
-            self._verify_credentials(credentials)
+            username = self._verify_credentials(credentials)
             # Because we set app.openapi_url to None, we need to restore it temporarily
             old_openapi_url = self.app.openapi_url
             self.app.openapi_url = self.openapi_url
             openapi_schema = self.app.openapi()
             self.app.openapi_url = old_openapi_url
-            return openapi_schema
+            return self._filter_openapi_schema(openapi_schema, username)
 
         # Set up Swagger UI endpoint if the original app had it
         if self.original_docs_url is not None:
