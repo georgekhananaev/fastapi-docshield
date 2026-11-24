@@ -196,7 +196,8 @@ def test_malformed_payload_with_a_valid_signature_is_rejected():
     _, shield = make_app(auth_method="form")
 
     for payload in ("YWRtaW4.soon", "####.9999999999"):
-        assert shield._read_session(f"{payload}.{shield._sign(payload)}") is None
+        token = f"{payload}.{shield._sign(payload, 'admin')}"
+        assert shield._read_session(token) is None
 
 
 def test_expired_session_is_rejected():
@@ -246,6 +247,24 @@ def test_sessions_need_the_same_secret():
     assert third._read_session(token) == "admin"
 
 
+def test_default_session_secret_is_random():
+    _, first = make_app(auth_method="form")
+    _, second = make_app(auth_method="form")
+
+    assert len(first._session_secret) == 32
+    assert first._session_secret != second._session_secret
+    assert second._read_session(first._create_session("admin")) is None
+
+
+def test_another_users_password_change_keeps_the_session():
+    _, shield = make_app(auth_method="form")
+    token = shield._create_session("dev")
+
+    shield.credentials["admin"] = "a-new-password"
+
+    assert shield._read_session(token) == "dev"
+
+
 def test_too_large_login_body_is_rejected():
     client = form_client()
 
@@ -253,6 +272,43 @@ def test_too_large_login_body_is_rejected():
 
     assert response.status_code == 401
     assert "set-cookie" not in response.headers
+
+
+def test_login_body_is_not_read_past_the_limit():
+    import asyncio
+
+    _, shield = make_app(auth_method="form")
+    chunks_read = []
+
+    class EndlessRequest:
+        headers = {}
+
+        async def stream(self):
+            while True:
+                chunks_read.append(1)
+                yield b"x" * 1024
+
+    form = asyncio.run(shield._read_login_form(EndlessRequest()))
+
+    assert form == {}
+    assert len(chunks_read) == 9
+
+
+def test_login_body_with_a_bad_content_length_is_rejected():
+    import asyncio
+
+    _, shield = make_app(auth_method="form")
+
+    class Request:
+        def __init__(self, content_length):
+            self.headers = {"content-length": content_length}
+
+        async def stream(self):
+            raise AssertionError("the body must not be read")
+            yield b""
+
+    for content_length in ("999999", "not-a-number"):
+        assert asyncio.run(shield._read_login_form(Request(content_length))) == {}
 
 
 def test_user_tags_apply_to_a_session():

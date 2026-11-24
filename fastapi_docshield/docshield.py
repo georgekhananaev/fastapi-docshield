@@ -117,7 +117,11 @@ class DocShield:
                 or "form" for a login page with a session cookie and a logout link
             login_url: URL path of the login page (form login only)
             logout_url: URL path that ends the session (form login only)
-            session_secret: Extra secret for signing the session cookie (optional)
+            session_secret: Secret for signing the session cookie (form login
+                only). Without it a random one is made at startup, which is
+                fine for a single process. Set a long random value when the app
+                runs in several worker processes or sessions should survive
+                a restart.
             session_max_age: Lifetime of a session in seconds (form login only)
         """
         if auth_method not in AUTH_METHODS:
@@ -150,7 +154,7 @@ class DocShield:
         self.session_max_age = session_max_age
         if isinstance(session_secret, str):
             session_secret = session_secret.encode("utf-8")
-        self._session_secret: bytes = session_secret or b"fastapi-docshield"
+        self._session_secret: bytes = session_secret or secrets.token_bytes(32)
 
         # Initialize static handler if fallback is enabled
         self.static_handler = (
@@ -272,42 +276,66 @@ class DocShield:
 
     # --- Session cookie (form login) ---------------------------------------
 
-    def _sign(self, payload: str) -> str:
+    def _sign(self, payload: str, username: str) -> str:
         """
-        Sign a session payload.
+        Sign a session payload with the session secret.
 
-        The key is built from the credentials, so a session stops working when
-        a password changes, and every worker process signs the same way.
+        The user's own password is part of the signed text, so the session
+        stops working when that password changes. Without the secret a
+        signature says nothing about any password.
         """
-        material = json.dumps(sorted(self.credentials.items())).encode("utf-8")
-        key = hmac.new(self._session_secret, material, hashlib.sha256).digest()
-        return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        message = f"{payload}.{self.credentials.get(username, '')}"
+        return hmac.new(
+            self._session_secret, message.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
 
     def _create_session(self, username: str) -> str:
         """Create the signed cookie value for a logged-in user."""
         # The padding is dropped, so the cookie value needs no quoting
         user = base64.urlsafe_b64encode(username.encode("utf-8")).decode("ascii")
         payload = f"{user.rstrip('=')}.{int(time.time()) + self.session_max_age}"
-        return f"{payload}.{self._sign(payload)}"
+        return f"{payload}.{self._sign(payload, username)}"
 
     def _read_session(self, token: Optional[str]) -> Optional[str]:
         """Return the username of a valid, unexpired session cookie, else None."""
         if not token:
             return None
         payload, _, signature = token.rpartition(".")
-        if not payload or not hmac.compare_digest(
-            signature.encode("utf-8"), self._sign(payload).encode("utf-8")
-        ):
-            return None
         user, _, expires = payload.partition(".")
         try:
-            if int(expires) < time.time():
-                return None
             padded = user + "=" * (-len(user) % 4)
             username = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+            expired = int(expires) < time.time()
         except ValueError:
             return None
-        return username if username in self.credentials else None
+        if username not in self.credentials:
+            return None
+        if not hmac.compare_digest(
+            signature.encode("utf-8"), self._sign(payload, username).encode("utf-8")
+        ):
+            return None
+        return None if expired else username
+
+    @staticmethod
+    async def _read_login_form(request: Request) -> Dict[str, List[str]]:
+        """
+        Read the fields of the login form.
+
+        The form has two short fields, so reading stops as soon as the body
+        is larger than that. A body that is too large counts as an empty form.
+        """
+        try:
+            declared_size = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            return {}
+        if declared_size > _MAX_LOGIN_BODY:
+            return {}
+        body = b""
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > _MAX_LOGIN_BODY:
+                return {}
+        return parse_qs(body.decode("utf-8", "replace"))
 
     def _login_target(self, requested: Optional[str]) -> str:
         """Where to send the user after login. Only our own pages are allowed."""
@@ -600,12 +628,7 @@ class DocShield:
 
         @app.post(self.login_url, include_in_schema=False)
         async def post_login(request: Request):
-            body = await request.body()
-            form = (
-                parse_qs(body.decode("utf-8", "replace"))
-                if len(body) <= _MAX_LOGIN_BODY
-                else {}
-            )
+            form = await self._read_login_form(request)
             username = form.get("username", [""])[0]
             password = form.get("password", [""])[0]
             target = self._login_target(form.get("next", [None])[0])

@@ -26,4 +26,6 @@ DocShield(
     auth_method="form",
     # A session lasts 8 hours by default. This one lasts 30 minutes.
     session_max_age=30 * 60,
+    # With several worker processes, also set session_secret to a long random
+    # value, for example session_secret=os.environ["DOCSHIELD_SESSION_SECRET"].
 )

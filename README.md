@@ -68,7 +68,8 @@ A visitor who opens `/docs` is sent to a login page. After login the session liv
 Good to know:
 
 - Scripts can still send HTTP Basic credentials, for example `curl -u admin:admin_password https://example.com/openapi.json`.
-- The cookie is signed with a key built from the credentials, so it works with several worker processes, and every session ends when a password changes. Pass `session_secret="..."` to mix in a secret of your own.
+- The cookie is signed with a random secret that is made when the app starts. That is fine for a single process. If the app runs in several worker processes, or sessions should survive a restart, set `session_secret` to a long random value of your own, for example from an environment variable.
+- A session ends when it expires, on logout, and when that user's password changes.
 - The login page is at `/docshield/login` and logout at `/docshield/logout`. Change them with `login_url` and `logout_url`.
 
 ## Different documentation for different users
@@ -157,7 +158,7 @@ A ready-made dark theme is in [fastapi-swagger-ui-dark-theme](https://github.com
 | `user_tags` | `None` | Username to allowed route tags |
 | `auth_method` | `"basic"` | `"basic"` or `"form"` |
 | `login_url`, `logout_url` | `"/docshield/login"`, `"/docshield/logout"` | Paths of the login page and the logout URL (form login) |
-| `session_secret` | `None` | Extra secret for signing the session cookie (form login) |
+| `session_secret` | `None` | Secret for signing the session cookie; needed with several worker processes (form login) |
 | `session_max_age` | `28800` | Lifetime of a session in seconds (form login) |
 
 DocShield follows the app's own settings where they exist: a page that is switched off on the app (`FastAPI(docs_url=None)`) stays off, `swagger_ui_parameters` and `swagger_ui_init_oauth` are passed on to Swagger UI, and behind a proxy the root path is put in front of every URL.
