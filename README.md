@@ -1,40 +1,32 @@
 # FastAPI DocShield
 
-A simple FastAPI integration to protect documentation endpoints with HTTP Basic Authentication.
+Protect FastAPI's `/docs`, `/redoc` and `/openapi.json` with a login: HTTP Basic Authentication or a login page.
 
-[![PyPI version](https://badge.fury.io/py/fastapi-docshield.svg)](https://badge.fury.io/py/fastapi-docshield)
+[![PyPI version](https://img.shields.io/pypi/v/fastapi-docshield)](https://pypi.org/project/fastapi-docshield/)
+[![Python versions](https://img.shields.io/pypi/pyversions/fastapi-docshield)](https://pypi.org/project/fastapi-docshield/)
+[![Tests](https://github.com/georgekhananaev/fastapi-docshield/actions/workflows/python-tests.yml/badge.svg)](https://github.com/georgekhananaev/fastapi-docshield/actions/workflows/python-tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python Versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/georgekhananaev/fastapi-docshield)
-[![Tests Status](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/georgekhananaev/fastapi-docshield)
-[![UV Compatible](https://img.shields.io/badge/uv-compatible-blueviolet)](https://github.com/astral-sh/uv)
 
-## About
+## Features
 
-Protect FastAPI's `/docs`, `/redoc`, and `/openapi.json` endpoints with HTTP Basic Authentication.
+- Protects Swagger UI, ReDoc and the OpenAPI JSON with one call
+- HTTP Basic Authentication, or a login page with a session and a "Log out" link
+- Several users, and different documentation for different users
+- Works without the CDN: Swagger UI and ReDoc are bundled as a fallback
+- Custom CSS and JavaScript for the documentation pages
+- Custom URLs for every endpoint, and support for apps behind a proxy
+- No dependencies besides FastAPI
 
 ## Installation
 
-### From PyPI
-
 ```bash
-# Install with pip
 pip install fastapi-docshield
 
 # Or with uv
-uv pip install fastapi-docshield
+uv add fastapi-docshield
 ```
 
-### From Source
-
-```bash
-git clone https://github.com/georgekhananaev/fastapi-docshield.git
-cd fastapi-docshield
-pip install -e .
-```
-
-## Quick Usage
-
-### Single User
+## Quick start
 
 ```python
 from fastapi import FastAPI
@@ -42,57 +34,58 @@ from fastapi_docshield import DocShield
 
 app = FastAPI()
 
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
-
-# Add protection to docs with a single user
-DocShield(
-    app=app,
-    credentials={"admin": "password123"}
-)
-```
-
-### Multiple Users
-
-```python
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
-
-app = FastAPI()
 
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
 
-# Add protection to docs with multiple users
+
 DocShield(
     app=app,
     credentials={
         "admin": "admin_password",
         "developer": "dev_password",
-        "viewer": "viewer_password"
-    }
+    },
 )
 ```
 
-### Role-Based Route Filtering (`user_tags`)
+Call `DocShield` after you create the app. `/docs`, `/redoc` and `/openapi.json` now ask for one of the usernames and passwords. In a real app, read the passwords from environment variables or your settings, not from the source code.
 
-Restrict which routes and Pydantic schemas each user sees in Swagger UI, ReDoc, and `/openapi.json` by mapping usernames to allowed FastAPI route `tags`. Users omitted from `user_tags` or mapped to `None` retain full access.
+## Login page with logout
+
+HTTP Basic Authentication has no logout: the browser keeps sending the password until it is closed. If you want a login page and a "Log out" link, use form login:
 
 ```python
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
+DocShield(
+    app=app,
+    credentials={"admin": "admin_password"},
+    auth_method="form",
+)
+```
 
-app = FastAPI()
+A visitor who opens `/docs` is sent to a login page. After login the session lives in a signed, HTTP-only cookie for 8 hours (`session_max_age`, in seconds). The documentation pages get a "Log out" link in the bottom right corner; hide it with `custom_css=".docshield-logout { display: none; }"` if you link to the logout URL yourself.
 
+Good to know:
+
+- Scripts can still send HTTP Basic credentials, for example `curl -u admin:admin_password https://example.com/openapi.json`.
+- The cookie is signed with a random secret that is made when the app starts. That is fine for a single process. If the app runs in several worker processes, or sessions should survive a restart, set `session_secret` to a long random value of your own, for example from an environment variable.
+- A session ends when it expires, on logout, and when that user's password changes.
+- The login page is at `/docshield/login` and logout at `/docshield/logout`. Change them with `login_url` and `logout_url`.
+
+## Different documentation for different users
+
+`user_tags` maps a username to the route tags that user may see. A user with tags sees only the matching routes, their schemas and tag descriptions. Users that are missing from `user_tags`, or mapped to `None`, see everything.
+
+```python
 @app.get("/", tags=["general"])
 def read_root():
     return {"Hello": "World"}
 
-@app.post("/posts/{id}", tags=["admin"])
-def create_post(id: int):
-    return {"id": id}
+
+@app.post("/posts/{post_id}", tags=["admin"])
+def create_post(post_id: int):
+    return {"id": post_id}
+
 
 DocShield(
     app=app,
@@ -101,233 +94,111 @@ DocShield(
         "developer": "dev_password",
     },
     user_tags={
-        "admin": None,            # Sees all routes and schemas
-        "developer": ["general"], # Sees only routes tagged "general" and their schemas
+        "admin": None,  # Sees all routes and schemas
+        "developer": ["general"],  # Sees only routes tagged "general"
     },
 )
 ```
 
-### CDN Fallback Mode (Default)
+Routes without a tag are hidden from users that have a tag list.
+
+This only changes what the documentation shows. It doesn't stop anyone from calling a hidden route, so the routes still need their own checks.
+
+## Working without the CDN
+
+By default the pages load Swagger UI and ReDoc from the jsDelivr CDN and switch to the copies bundled in the package when the CDN can't be reached.
 
 ```python
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
+# Always use the bundled files, never the CDN
+DocShield(app=app, credentials=credentials, prefer_local=True)
 
-app = FastAPI()
+# CDN only, without the bundled fallback
+DocShield(app=app, credentials=credentials, use_cdn_fallback=False)
 
-# Default mode: Use CDN with automatic fallback to local files
+# Your own copies
 DocShield(
     app=app,
-    credentials={"admin": "password123"},
-    use_cdn_fallback=True  # Default - automatically falls back to local if CDN fails
+    credentials=credentials,
+    swagger_js_url="https://assets.example.com/swagger-ui-bundle.js",
+    swagger_css_url="https://assets.example.com/swagger-ui.css",
+    redoc_js_url="https://assets.example.com/redoc.standalone.js",
 )
 ```
 
-### Prefer Local Files
+## Custom CSS and JavaScript
 
 ```python
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
-
-app = FastAPI()
-
-# Always use local files instead of CDN
-DocShield(
-    app=app,
-    credentials={"admin": "password123"},
-    prefer_local=True  # Serve documentation from bundled static files
-)
-```
-
-### CDN Only (No Fallback)
-
-```python
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
-
-app = FastAPI()
-
-# Use CDN without fallback (original behavior)
-DocShield(
-    app=app,
-    credentials={"admin": "password123"},
-    use_cdn_fallback=False  # Disable fallback, CDN only
-)
-```
-
-### Custom CSS and JavaScript
-
-```python
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
-import requests
-
-app = FastAPI()
-
-# Load dark theme CSS from external source
-# You can use https://github.com/georgekhananaev/fastapi-swagger-dark
-dark_theme_url = "https://raw.githubusercontent.com/georgekhananaev/fastapi-swagger-dark/main/src/fastapi_swagger_dark/swagger_ui_dark.min.css"
-custom_css = requests.get(dark_theme_url).text
-
-# Custom JavaScript for analytics
-custom_js = """
-console.log('📊 Documentation accessed at:', new Date().toISOString());
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Dark theme loaded!');
-});
-"""
-
-# Apply with custom styling
-DocShield(
-    app=app,
-    credentials={"admin": "password123"},
-    custom_css=custom_css,
-    custom_js=custom_js
-)
-```
-
-### Using with fastapi-swagger-dark
-
-You can download .css files from here: https://github.com/georgekhananaev/fastapi-swagger-ui-dark-theme
-
-```python
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
 from pathlib import Path
-import logging
-
-# Configure logging
-logger = logging.getLogger(__name__)
-
-app = FastAPI()
-
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
-
-# Load dark theme CSS from local file with error handling
-try:
-    css_path = Path("static/swagger_ui_dark.min.css")
-    with open(css_path, "r", encoding="utf-8") as f:
-        dark_css = f.read()
-    logger.info("Dark theme CSS loaded successfully")
-except FileNotFoundError:
-    logger.warning(f"Dark theme CSS file not found at {css_path}")
-    dark_css = ""  # Fallback to default theme
-except Exception as e:
-    logger.warning(f"Failed to load dark theme CSS - {type(e).__name__}: {str(e)}")
-    dark_css = ""  # Fallback to default theme
-
-# Apply DocShield with dark theme and authentication
-DocShield(
-    app=app,
-    credentials={"admin": "admin123456"},  # Protect with authentication
-    custom_css=dark_css,  # Apply dark theme (falls back to default if loading failed)
-    prefer_local=True  # Use local files for better reliability
-)
-```
-
-#### Alternative: Load from URL
-
-```python
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
-import requests
-
-app = FastAPI()
-
-# Fetch dark theme CSS from GitHub
-dark_theme_url = "https://raw.githubusercontent.com/georgekhananaev/fastapi-swagger-ui-dark/main/swagger_ui_dark.min.css"
-dark_css = requests.get(dark_theme_url).text
 
 DocShield(
     app=app,
-    credentials={
-        "admin": "admin_password",
-        "developer": "dev_password"  # Multiple users supported
-    },
-    custom_css=dark_css
+    credentials={"admin": "admin_password"},
+    custom_css=Path("static/swagger_ui_dark.min.css").read_text(encoding="utf-8"),
+    custom_js="console.log('Documentation opened at', new Date().toISOString());",
 )
 ```
 
-See [examples/custom_styling.py](examples/custom_styling.py) for more customization examples including:
-- ✨ Minimal clean theme
-- 🏢 Corporate theme with analytics
-- 📖 ReDoc customization
-- 🎨 Custom branding
+The CSS is added after the Swagger UI stylesheet, so your rules win. The JavaScript runs after the documentation has loaded; on the Swagger UI page the `ui` object is available to it.
 
-## Running Demo
+A ready-made dark theme is in [fastapi-swagger-ui-dark-theme](https://github.com/georgekhananaev/fastapi-swagger-ui-dark-theme). See [examples/custom_styling.py](examples/custom_styling.py) for more themes: a minimal one, a corporate one with analytics, and a ReDoc one.
+
+## All options
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `app` | required | The FastAPI app to protect |
+| `credentials` | required | Dictionary of username to password |
+| `docs_url` | `"/docs"` | Path of the Swagger UI page |
+| `redoc_url` | `"/redoc"` | Path of the ReDoc page |
+| `openapi_url` | `"/openapi.json"` | Path of the OpenAPI schema |
+| `swagger_js_url`, `swagger_css_url`, `redoc_js_url` | `None` | Your own URLs for the Swagger UI and ReDoc files |
+| `use_cdn_fallback` | `True` | Fall back to the bundled files when the CDN fails |
+| `prefer_local` | `False` | Always use the bundled files |
+| `custom_css`, `custom_js` | `None` | CSS and JavaScript to add to the documentation pages |
+| `user_tags` | `None` | Username to allowed route tags |
+| `auth_method` | `"basic"` | `"basic"` or `"form"` |
+| `login_url`, `logout_url` | `"/docshield/login"`, `"/docshield/logout"` | Paths of the login page and the logout URL (form login) |
+| `session_secret` | `None` | Secret for signing the session cookie; needed with several worker processes (form login) |
+| `session_max_age` | `28800` | Lifetime of a session in seconds (form login) |
+
+DocShield follows the app's own settings where they exist: a page that is switched off on the app (`FastAPI(docs_url=None)`) stays off, `swagger_ui_parameters` and `swagger_ui_init_oauth` are passed on to Swagger UI, and behind a proxy the root path is put in front of every URL.
+
+## Security notes
+
+- Always serve the documentation over HTTPS. Both HTTP Basic credentials and the session cookie can be read on a plain HTTP connection.
+- DocShield keeps casual visitors out of your documentation. It has no rate limiting or lockout, so use long random passwords.
+- Passwords are compared in constant time, and the session cookie is signed with HMAC-SHA256.
+
+## Compatibility
+
+- Python 3.8 to 3.14
+- FastAPI 0.68 and newer
+
+Every release is tested against the oldest and the newest supported versions.
+
+## Examples
 
 ```bash
-# Run the demo app
-python demo.py
-
-# Visit http://localhost:8000/docs
-# Username: admin
-# Password: password123
+pip install uvicorn
+uvicorn examples.basic_example:app --reload
 ```
 
-## Running Tests
+Then open http://localhost:8000/docs and log in with `admin` / `password123`. The [examples](examples) folder also has [form login](examples/form_login.py), [user tags](examples/user_tags.py) and [custom styling](examples/custom_styling.py).
+
+## Development
 
 ```bash
-# Install test dependencies
-pip install pytest httpx
+git clone https://github.com/georgekhananaev/fastapi-docshield.git
+cd fastapi-docshield
+pip install -e ".[dev]"
 
-# Run all tests
-pytest
-
-# Run with coverage
 pytest --cov=fastapi_docshield
+ruff check . && ruff format --check .
 ```
-
-## Features
-
-- Protect Swagger UI, ReDoc, and OpenAPI JSON endpoints
-- Customizable endpoint URLs
-- Multiple username/password combinations
-- **Automatic CDN fallback** - Falls back to local files if CDN is unavailable
-- **Local file preference option** - Serve documentation from local files for better reliability
-- **Custom CSS and JavaScript injection** - Fully customize the look and behavior of documentation
-- **Resilient documentation** - Works even when CDN is down or blocked
-- Tested on Python 3.7-3.13
-- Compatible with uv package manager
 
 ## Changelog
 
-### Version 0.2.1 (2025-08-17)
-- **Fixed**: Blank page issue after authentication for some users
-  - Improved handling of custom URL parameters by storing them as instance variables
-  - Simplified `_setup_routes()` method for better maintainability
-  - Applied fix from PR #2 for more robust URL parameter handling
-- **Fixed**: Route removal logic now correctly removes all default documentation routes
-  - Properly removes `/docs`, `/redoc`, and `/openapi.json` endpoints
-  - Prevents 500 errors when accessing old endpoints
-- **Improved**: Example files and documentation
-  - Fixed `custom_styling.py` to work with uvicorn by adding default app variable
-  - Standardized credentials across all custom styling examples
-  - Added `python-multipart` to dev dependencies for form data handling
-  - Added clear run instructions in example files
-
-### Version 0.2.0 (2025-08-17)
-- **Added**: Custom CSS and JavaScript injection support
-  - New `custom_css` parameter to inject custom styles into documentation pages
-  - New `custom_js` parameter to inject custom JavaScript for enhanced functionality
-  - Complete customization examples for dark theme, minimal theme, corporate branding, and analytics
-  - Support for both Swagger UI and ReDoc customization
-- **Added**: Automatic CDN fallback to local files for better reliability
-  - Documentation now automatically falls back to bundled static files if CDN is unavailable
-  - New `prefer_local` option to always serve from local files
-  - New `use_cdn_fallback` option to control fallback behavior
-  - Bundled Swagger UI and ReDoc static files for offline capability
-- **Fixed**: Static file URL bug that caused blank documentation pages
-  - Previously, when no custom CDN URLs were provided, the package would pass `None` values to FastAPI's documentation functions
-  - This resulted in HTML with `href="None"` and `src="None"`, causing white/blank pages
-  - Now properly handles default CDN URLs when custom URLs are not specified
-
-### Version 0.1.0 (2025-01-15)
-- Initial release
-- Basic HTTP authentication for FastAPI documentation endpoints
-- Support for multiple users
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

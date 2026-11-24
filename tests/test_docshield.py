@@ -20,18 +20,11 @@ def test_docs_protected():
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
 
-    shield = DocShield(app=app, credentials={"admin": "password123"})
-
-    print(f"In test: app.docs_url = {app.docs_url}")
-    print(f"In test: app.redoc_url = {app.redoc_url}")
-    print(f"In test: shield.docs_url = {shield.docs_url}")
+    DocShield(app=app, credentials={"admin": "password123"})
 
     client = TestClient(app)
     # Request without auth should fail
     response = client.get("/docs")
-    print(f"Response status: {response.status_code}")
-    print(f"Response headers: {response.headers}")
-    print(f"Response text: {response.text[:100]}")  # Just the first 100 chars
     assert response.status_code == 401
     assert response.headers.get("WWW-Authenticate") == "Basic"
 
@@ -43,7 +36,7 @@ def test_redoc_protected():
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
 
-    shield = DocShield(app=app, credentials={"admin": "password123"})
+    DocShield(app=app, credentials={"admin": "password123"})
 
     client = TestClient(app)
     # Request without auth should fail
@@ -59,7 +52,7 @@ def test_openapi_protected():
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
 
-    shield = DocShield(app=app, credentials={"admin": "password123"})
+    DocShield(app=app, credentials={"admin": "password123"})
 
     client = TestClient(app)
     # Request without auth should fail
@@ -75,7 +68,7 @@ def test_valid_credentials():
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
 
-    shield = DocShield(app=app, credentials={"admin": "password123"})
+    DocShield(app=app, credentials={"admin": "password123"})
 
     client = TestClient(app)
     # Use auth headers directly
@@ -97,7 +90,7 @@ def test_invalid_credentials():
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
 
-    shield = DocShield(app=app, credentials={"admin": "password123"})
+    DocShield(app=app, credentials={"admin": "password123"})
 
     client = TestClient(app)
     # Use incorrect password in auth headers
@@ -114,7 +107,7 @@ def test_multiple_credentials():
     app.docs_url = "/docs"
     app.redoc_url = "/redoc"
 
-    shield = DocShield(app=app, credentials={"admin": "password123", "dev": "devpass"})
+    DocShield(app=app, credentials={"admin": "password123", "dev": "devpass"})
 
     client = TestClient(app)
 
@@ -141,7 +134,7 @@ def test_custom_urls():
     def read_root():
         return {"message": "Hello World"}
 
-    shield = DocShield(
+    DocShield(
         app=app,
         credentials={"admin": "password123"},
         docs_url="/custom-docs",

@@ -74,3 +74,7 @@ dmypy.json
 
 # Claude Code memory file
 CLAUDE.md
+
+# Tool caches and local lock file
+.ruff_cache/
+uv.lock
