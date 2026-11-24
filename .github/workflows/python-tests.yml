@@ -18,23 +18,27 @@ jobs:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
+    # uv installs the Python version, because the runner image no longer
+    # ships the oldest ones.
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python
       uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.12"
 
-    - name: Install dependencies
+    - name: Install dependencies on Python ${{ matrix.python-version }}
       run: |
-        python -m pip install --upgrade pip
-        python -m pip install -e ".[dev]"
+        python -m pip install --upgrade pip uv
+        uv venv --python ${{ matrix.python-version }} .venv
+        uv pip install --python .venv -e ".[dev]"
 
     - name: Test with pytest
       run: |
-        pytest --cov=fastapi_docshield
+        .venv/bin/python --version
+        .venv/bin/python -m pytest --cov=fastapi_docshield
 
   test-oldest:
     name: test (oldest FastAPI)
@@ -44,22 +48,23 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - name: Set up Python 3.8
+    - name: Set up Python
       uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
-        python-version: "3.8"
+        python-version: "3.12"
 
     # The oldest FastAPI the package supports, with the test client of its time
-    - name: Install dependencies
+    - name: Install dependencies on Python 3.8
       run: |
-        python -m pip install --upgrade pip
-        python -m pip install "fastapi==0.68.0" pytest requests uvicorn
-        python -m pip install -e .
+        python -m pip install --upgrade pip uv
+        uv venv --python 3.8 .venv
+        uv pip install --python .venv "fastapi==0.68.0" pytest requests uvicorn
+        uv pip install --python .venv -e .
 
     - name: Test with pytest
       run: |
-        python -c "import fastapi; assert fastapi.__version__ == '0.68.0', fastapi.__version__"
-        pytest
+        .venv/bin/python -c "import sys, fastapi; print(sys.version); assert fastapi.__version__ == '0.68.0', fastapi.__version__"
+        .venv/bin/python -m pytest
 
   lint:
     runs-on: ubuntu-latest
