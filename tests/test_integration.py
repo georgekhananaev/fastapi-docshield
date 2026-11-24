@@ -1,12 +1,13 @@
-import unittest
 import base64
+import os
+import signal
 import socket
 import subprocess
 import sys
 import time
+import unittest
+
 import requests
-import signal
-import os
 
 
 def _free_port():
@@ -25,7 +26,14 @@ class DocShieldIntegrationTest(unittest.TestCase):
         cls.port = _free_port()
         cls.base_url = f"http://127.0.0.1:{cls.port}"
         cls.process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "examples.manual_test:app", "--port", str(cls.port)],
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "examples.manual_test:app",
+                "--port",
+                str(cls.port),
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -33,7 +41,9 @@ class DocShieldIntegrationTest(unittest.TestCase):
         deadline = time.time() + 15
         while time.time() < deadline:
             if cls.process.poll() is not None:
-                raise RuntimeError(f"Test server exited early: {cls.process.stderr.read().decode()}")
+                raise RuntimeError(
+                    f"Test server exited early: {cls.process.stderr.read().decode()}"
+                )
             try:
                 requests.get(cls.base_url, timeout=0.5)
                 return
@@ -54,40 +64,40 @@ class DocShieldIntegrationTest(unittest.TestCase):
         credentials = f"{username}:{password}"
         encoded = base64.b64encode(credentials.encode()).decode()
         return {"Authorization": f"Basic {encoded}"}
-    
+
     def test_docs_protected(self):
         """Test that docs endpoint requires authentication."""
         response = requests.get(f"{self.base_url}/docs")
         self.assertEqual(response.status_code, 401)
         self.assertIn("WWW-Authenticate", response.headers)
         self.assertEqual(response.headers["WWW-Authenticate"], "Basic")
-    
+
     def test_redoc_protected(self):
         """Test that redoc endpoint requires authentication."""
         response = requests.get(f"{self.base_url}/redoc")
         self.assertEqual(response.status_code, 401)
         self.assertIn("WWW-Authenticate", response.headers)
         self.assertEqual(response.headers["WWW-Authenticate"], "Basic")
-    
+
     def test_openapi_protected(self):
         """Test that openapi.json endpoint requires authentication."""
         response = requests.get(f"{self.base_url}/openapi.json")
         self.assertEqual(response.status_code, 401)
         self.assertIn("WWW-Authenticate", response.headers)
         self.assertEqual(response.headers["WWW-Authenticate"], "Basic")
-    
+
     def test_valid_credentials(self):
         """Test that valid credentials allow access to docs endpoints."""
         headers = self.get_auth_header("admin", "password123")
-        
+
         response = requests.get(f"{self.base_url}/docs", headers=headers)
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.headers["content-type"])
-        
+
         response = requests.get(f"{self.base_url}/openapi.json", headers=headers)
         self.assertEqual(response.status_code, 200)
         self.assertIn("application/json", response.headers["content-type"])
-    
+
     def test_invalid_credentials(self):
         """Test that invalid credentials are rejected."""
         headers = self.get_auth_header("admin", "wrongpassword")

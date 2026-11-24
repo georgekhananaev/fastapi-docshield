@@ -1,22 +1,25 @@
 #!/usr/bin/env python
 """Simple test for custom CSS/JS"""
 
-from fastapi import FastAPI
-from fastapi_docshield import DocShield
 import uvicorn
+from fastapi import FastAPI
+
+from fastapi_docshield import DocShield
 
 app = FastAPI(title="Test Custom")
+
 
 @app.get("/")
 def root():
     return {"test": "custom"}
+
 
 # Test with custom CSS
 DocShield(
     app=app,
     credentials={"test": "test"},
     custom_css=".swagger-ui { background: red; }",
-    custom_js="console.log('Custom JS works!');"
+    custom_js="console.log('Custom JS works!');",
 )
 
 if __name__ == "__main__":

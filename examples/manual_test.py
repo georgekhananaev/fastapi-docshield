@@ -3,7 +3,9 @@ Simple test script to manually verify DocShield v0.2.0 functionality.
 Run with:
     uvicorn manual_test:app --reload
 """
+
 from fastapi import FastAPI
+
 from fastapi_docshield import DocShield
 
 app = FastAPI(
@@ -11,6 +13,7 @@ app = FastAPI(
     description="Testing API for DocShield v0.2.0 with all new features",
     version="0.2.0",
 )
+
 
 # Add test routes
 @app.get("/")
@@ -22,25 +25,21 @@ def read_root():
         "features": {
             "cdn_fallback": "Enabled by default",
             "custom_styling": "Supported",
-            "multi_user": "Supported"
-        }
+            "multi_user": "Supported",
+        },
     }
+
 
 @app.get("/test")
 def test_endpoint():
     return {"test": "successful", "version": "0.2.0"}
 
+
 # Test different configuration options
 # Uncomment different configurations to test various features
 
 # Configuration 1: Basic protection with defaults
-shield = DocShield(
-    app=app,
-    credentials={
-        "admin": "password123",
-        "user": "user456"
-    }
-)
+shield = DocShield(app=app, credentials={"admin": "password123", "user": "user456"})
 
 # Configuration 2: With custom styling (uncomment to test)
 # shield = DocShield(
