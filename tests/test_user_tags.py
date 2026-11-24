@@ -1,3 +1,4 @@
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -132,3 +133,43 @@ def test_empty_tag_list_hides_all_routes_and_schemas():
 
     assert data["paths"] == {}
     assert data["components"]["schemas"] == {}
+
+
+def test_webhooks_are_filtered_too():
+    app = FastAPI(title="Webhook API")
+    if not hasattr(app, "webhooks"):
+        pytest.skip("This FastAPI version has no webhooks")
+
+    @app.get("/", tags=["general"])
+    def root():
+        return {}
+
+    @app.webhooks.post("new-post", tags=["general"])
+    def new_post(body: PublicPost):
+        """Sent when a post is published."""
+
+    @app.webhooks.post("audit", tags=["admin"])
+    def audit(body: AdminAuditLog):
+        """Sent for every admin action."""
+
+    DocShield(
+        app=app,
+        credentials={"developer": "dev_pass"},
+        user_tags={"developer": ["general"]},
+    )
+    data = TestClient(app).get("/openapi.json", auth=("developer", "dev_pass")).json()
+
+    assert list(data["webhooks"]) == ["new-post"]
+    assert "PublicPost" in data["components"]["schemas"]
+    assert "Author" in data["components"]["schemas"]
+    assert "AdminAuditLog" not in data["components"]["schemas"]
+
+
+def test_restricted_schema_keeps_other_sections():
+    app = _create_app(user_tags={"developer": ["general"]})
+    client = TestClient(app)
+
+    data = client.get("/openapi.json", auth=("developer", "dev_pass")).json()
+
+    assert data["info"]["title"] == "Tag Filter Test API"
+    assert data["openapi"].startswith("3.")

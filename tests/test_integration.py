@@ -30,7 +30,7 @@ class DocShieldIntegrationTest(unittest.TestCase):
                 sys.executable,
                 "-m",
                 "uvicorn",
-                "examples.manual_test:app",
+                "tests.integration_app:app",
                 "--port",
                 str(cls.port),
             ],

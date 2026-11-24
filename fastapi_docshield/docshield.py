@@ -1,24 +1,64 @@
 """
-FastAPI DocShield - A simple module to protect FastAPI documentation endpoints with HTTP Basic Auth.
+FastAPI DocShield - protect FastAPI's documentation endpoints with a login.
 
 Author: George Khananaev
 License: MIT
 Copyright (c) 2025 George Khananaev
 """
 
-__version__ = "0.2.1"
-
+import base64
 import copy
+import hashlib
+import hmac
+import html
+import json
 import secrets
-from collections.abc import Iterable
-from typing import Any
+import time
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from urllib.parse import parse_qs, quote
 
-from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from .static_handler import StaticHandler
+from . import _templates
+from ._version import __version__ as __version__
+from .static_handler import (
+    REDOC_JS_CDN_URL,
+    REDOC_JS_LOCAL_URL,
+    STATIC_URL_PREFIX,
+    SWAGGER_CSS_CDN_URL,
+    SWAGGER_CSS_LOCAL_URL,
+    SWAGGER_JS_CDN_URL,
+    SWAGGER_JS_LOCAL_URL,
+    StaticHandler,
+)
+
+AUTH_METHODS = ("basic", "form")
+SESSION_COOKIE_NAME = "docshield_session"
+NO_STORE = {"Cache-Control": "no-store"}
+
+# The login form sends two short fields, so a bigger body is not a login.
+_MAX_LOGIN_BODY = 8 * 1024
+_HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+_SWAGGER_UI_DEFAULTS: Dict[str, Any] = {
+    "dom_id": "#swagger-ui",
+    "layout": "BaseLayout",
+    "deepLinking": True,
+    "showExtensions": True,
+    "showCommonExtensions": True,
+}
+
+
+def _root_path(request: Request) -> str:
+    """The prefix the app is served under, for example behind a proxy."""
+    return request.scope.get("root_path", "").rstrip("/")
+
+
+def _js(value: Any) -> str:
+    """Encode a value as JSON that is safe inside a <script> tag."""
+    return json.dumps(value).replace("</", "<\\/")
 
 
 class DocShield:
@@ -26,8 +66,8 @@ class DocShield:
     DocShield provides authentication protection for FastAPI's
     built-in documentation endpoints.
 
-    This class allows you to easily secure both /docs (Swagger UI) and /redoc endpoints
-    with HTTP Basic Authentication.
+    It secures /docs (Swagger UI), /redoc and /openapi.json with
+    HTTP Basic Authentication or with a login page.
 
     Author: George Khananaev
     License: MIT License
@@ -36,18 +76,23 @@ class DocShield:
     def __init__(
         self,
         app: FastAPI,
-        credentials: dict[str, str],
+        credentials: Dict[str, str],
         docs_url: str = "/docs",
         redoc_url: str = "/redoc",
         openapi_url: str = "/openapi.json",
-        swagger_js_url: str | None = None,
-        swagger_css_url: str | None = None,
-        redoc_js_url: str | None = None,
+        swagger_js_url: Optional[str] = None,
+        swagger_css_url: Optional[str] = None,
+        redoc_js_url: Optional[str] = None,
         use_cdn_fallback: bool = True,
         prefer_local: bool = False,
-        custom_css: str | None = None,
-        custom_js: str | None = None,
-        user_tags: dict[str, Iterable[str] | None] | None = None,
+        custom_css: Optional[str] = None,
+        custom_js: Optional[str] = None,
+        user_tags: Optional[Dict[str, Optional[Iterable[str]]]] = None,
+        auth_method: str = "basic",
+        login_url: str = "/docshield/login",
+        logout_url: str = "/docshield/logout",
+        session_secret: Union[str, bytes, None] = None,
+        session_max_age: int = 8 * 60 * 60,
     ):
         """
         Initialize DocShield with the given FastAPI application and credentials.
@@ -65,9 +110,23 @@ class DocShield:
             prefer_local: Prefer local static files over CDN
             custom_css: Custom CSS to inject into documentation pages
             custom_js: Custom JavaScript to inject into documentation pages
-            user_tags: Optional dictionary of user-defined tags for documentation
+            user_tags: Optional dictionary of username to allowed route tags.
+                A user with tags only sees matching routes in the documentation.
+                Users that are missing or mapped to None see everything.
+            auth_method: "basic" for the browser's HTTP Basic prompt (default),
+                or "form" for a login page with a session cookie and a logout link
+            login_url: URL path of the login page (form login only)
+            logout_url: URL path that ends the session (form login only)
+            session_secret: Extra secret for signing the session cookie (optional)
+            session_max_age: Lifetime of a session in seconds (form login only)
         """
-        # Initialize security scheme
+        if auth_method not in AUTH_METHODS:
+            raise ValueError(
+                f"auth_method must be one of {AUTH_METHODS}, got {auth_method!r}"
+            )
+
+        # DocShield reads the Authorization header itself (see _basic_credentials).
+        # The scheme stays here for code that uses it to protect its own routes.
         self.security = HTTPBasic()
         self.app = app
         self.credentials = credentials
@@ -81,10 +140,17 @@ class DocShield:
         self.prefer_local = prefer_local
         self.custom_css = custom_css
         self.custom_js = custom_js
-        self.user_tags: dict[str, set[str] | None] = {
+        self.user_tags: Dict[str, Optional[Set[str]]] = {
             user: (set(tags) if tags is not None else None)
             for user, tags in (user_tags or {}).items()
         }
+        self.auth_method = auth_method
+        self.login_url = login_url
+        self.logout_url = logout_url
+        self.session_max_age = session_max_age
+        if isinstance(session_secret, str):
+            session_secret = session_secret.encode("utf-8")
+        self._session_secret: bytes = session_secret or b"fastapi-docshield"
 
         # Initialize static handler if fallback is enabled
         self.static_handler = (
@@ -95,6 +161,9 @@ class DocShield:
         self.original_docs_url = app.docs_url
         self.original_redoc_url = app.redoc_url
         self.original_openapi_url = app.openapi_url
+        self._oauth2_redirect_url: Optional[str] = getattr(
+            app, "swagger_ui_oauth2_redirect_url", None
+        )
 
         # Remove existing documentation routes
         self._remove_existing_docs_routes()
@@ -109,38 +178,48 @@ class DocShield:
 
     def _remove_existing_docs_routes(self) -> None:
         """
-        Remove the existing documentation routes from the FastAPI app.
-        This ensures the default routes don't conflict with our secured ones.
+        Remove FastAPI's own documentation routes from the app, so they
+        don't answer without a login next to the protected ones.
+
+        Only exact paths are removed. Other routes of the app stay,
+        including ones that live under the docs path, like /docs/guide.
         """
-        # Since FastAPI.routes is a property with no setter, we have to use the underlying router
-        # Get all non-documentation routes
-        routes_to_keep = []
+        docs_paths = {
+            self.original_docs_url,
+            self.original_redoc_url,
+            self.original_openapi_url,
+            self._oauth2_redirect_url,
+            self.docs_url,
+            self.redoc_url,
+            self.openapi_url,
+        }
+        self.app.router.routes[:] = [
+            route
+            for route in self.app.router.routes
+            if getattr(route, "path", None) not in docs_paths
+        ]
 
-        # Identify and filter out documentation routes
-        for route in self.app.routes:
-            path = getattr(route, "path", "")
+    # --- Authentication ---------------------------------------------------
 
-            # Skip both original and new documentation routes
-            if (
-                path == self.original_docs_url
-                or path == self.original_redoc_url
-                or path == self.original_openapi_url
-                or path == self.docs_url
-                or path == self.redoc_url
-                or path == self.openapi_url
-                or path == "/docs"  # Default docs
-                or path == "/redoc"  # Default redoc
-                or path == "/openapi.json"  # Default openapi
-                or path.startswith("/docs/")  # Docs static files
-                or path.startswith(f"{self.docs_url}/")
-            ):  # New docs static files
-                continue
+    def _password_matches(self, username: str, password: str) -> bool:
+        """Check a username and password against the credentials dictionary."""
+        expected = self.credentials.get(username)
+        # Compare even when the user doesn't exist, so the response time
+        # doesn't show which usernames are valid. Bytes are compared because
+        # compare_digest rejects text with non-ASCII characters.
+        matches = secrets.compare_digest(
+            password.encode("utf-8"), (expected or "").encode("utf-8")
+        )
+        return expected is not None and matches
 
-            routes_to_keep.append(route)
-
-        # Use a different approach - set up a fresh router and add all non-docs routes
-        # We can access the router directly
-        self.app.router.routes = routes_to_keep
+    def _unauthorized(self) -> HTTPException:
+        """The error for a request that isn't logged in."""
+        headers = {"WWW-Authenticate": "Basic"} if self.auth_method == "basic" else None
+        return HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers=headers,
+        )
 
     def _verify_credentials(self, credentials: HTTPBasicCredentials) -> str:
         """
@@ -155,27 +234,126 @@ class DocShield:
         Raises:
             HTTPException: If authentication fails
         """
-        username = credentials.username
-        password = credentials.password
-
-        # Check if username exists and password is correct
-        if username in self.credentials:
-            is_correct_password = secrets.compare_digest(
-                password,
-                self.credentials[username],
-            )
-            if is_correct_password:
-                return username
-
-        # If credentials are invalid, raise an exception
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+        if self._password_matches(credentials.username, credentials.password):
+            return credentials.username
+        raise self._unauthorized()
 
     @staticmethod
-    def _collect_schema_refs(obj: Any, refs: set[str]) -> None:
+    def _basic_credentials(request: Request) -> Optional[Tuple[str, str]]:
+        """
+        Read the username and password of an HTTP Basic Authorization header.
+
+        The header is decoded as UTF-8, which is what browsers send, so
+        passwords with non-ASCII characters work.
+        """
+        scheme, _, param = request.headers.get("Authorization", "").partition(" ")
+        if scheme.lower() != "basic":
+            return None
+        try:
+            data = base64.b64decode(param.strip()).decode("utf-8")
+        except ValueError:
+            return None
+        username, separator, password = data.partition(":")
+        return (username, password) if separator else None
+
+    def _authenticate(self, request: Request) -> Optional[str]:
+        """
+        Return the logged-in username, or None when the request has no valid login.
+
+        HTTP Basic credentials are accepted with both auth methods, so scripts
+        can fetch the schema when the pages use form login.
+        """
+        credentials = self._basic_credentials(request)
+        if credentials is not None and self._password_matches(*credentials):
+            return credentials[0]
+        if self.auth_method == "form":
+            return self._read_session(request.cookies.get(SESSION_COOKIE_NAME))
+        return None
+
+    # --- Session cookie (form login) ---------------------------------------
+
+    def _sign(self, payload: str) -> str:
+        """
+        Sign a session payload.
+
+        The key is built from the credentials, so a session stops working when
+        a password changes, and every worker process signs the same way.
+        """
+        material = json.dumps(sorted(self.credentials.items())).encode("utf-8")
+        key = hmac.new(self._session_secret, material, hashlib.sha256).digest()
+        return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def _create_session(self, username: str) -> str:
+        """Create the signed cookie value for a logged-in user."""
+        # The padding is dropped, so the cookie value needs no quoting
+        user = base64.urlsafe_b64encode(username.encode("utf-8")).decode("ascii")
+        payload = f"{user.rstrip('=')}.{int(time.time()) + self.session_max_age}"
+        return f"{payload}.{self._sign(payload)}"
+
+    def _read_session(self, token: Optional[str]) -> Optional[str]:
+        """Return the username of a valid, unexpired session cookie, else None."""
+        if not token:
+            return None
+        payload, _, signature = token.rpartition(".")
+        if not payload or not hmac.compare_digest(
+            signature.encode("utf-8"), self._sign(payload).encode("utf-8")
+        ):
+            return None
+        user, _, expires = payload.partition(".")
+        try:
+            if int(expires) < time.time():
+                return None
+            padded = user + "=" * (-len(user) % 4)
+            username = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+        except ValueError:
+            return None
+        return username if username in self.credentials else None
+
+    def _login_target(self, requested: Optional[str]) -> str:
+        """Where to send the user after login. Only our own pages are allowed."""
+        pages = []
+        if self.original_docs_url is not None:
+            pages.append(self.docs_url)
+        if self.original_redoc_url is not None:
+            pages.append(self.redoc_url)
+        if requested in pages:
+            return str(requested)
+        return pages[0] if pages else self.openapi_url
+
+    def _login_page(
+        self, request: Request, next_url: str, failed: bool = False
+    ) -> HTMLResponse:
+        """Render the login page."""
+        error = '<p class="error">Incorrect username or password</p>' if failed else ""
+        content = _templates.render(
+            _templates.LOGIN_PAGE,
+            {
+                "TITLE": html.escape(f"{self.app.title} - Log in"),
+                "HEADING": html.escape(self.app.title),
+                "ACTION": html.escape(_root_path(request) + self.login_url),
+                "NEXT": html.escape(next_url),
+                "ERROR": error,
+            },
+        )
+        return HTMLResponse(
+            content=content,
+            status_code=status.HTTP_401_UNAUTHORIZED if failed else status.HTTP_200_OK,
+            headers=NO_STORE,
+        )
+
+    def _login_required(self, request: Request, page_url: str) -> RedirectResponse:
+        """Answer a page request that isn't logged in."""
+        if self.auth_method == "basic":
+            raise self._unauthorized()
+        login_url = (
+            f"{_root_path(request)}{self.login_url}?next={quote(page_url, safe='/')}"
+        )
+        return RedirectResponse(login_url, status_code=status.HTTP_303_SEE_OTHER)
+
+    # --- OpenAPI schema -----------------------------------------------------
+
+    @staticmethod
+    def _collect_schema_refs(obj: Any, refs: Set[str]) -> None:
         """Recursively collect all referenced component schema names
         from an OpenAPI object."""
         if isinstance(obj, dict):
@@ -188,11 +366,34 @@ class DocShield:
             for item in obj:
                 DocShield._collect_schema_refs(item, refs)
 
+    @staticmethod
+    def _filter_path_items(
+        path_items: Dict[str, Any], allowed_tags: Set[str]
+    ) -> Dict[str, Any]:
+        """Keep the operations that carry an allowed tag. Untagged ones are dropped."""
+        filtered: Dict[str, Any] = {}
+        for path, path_item in path_items.items():
+            if not isinstance(path_item, dict):
+                continue
+            allowed_operations = {}
+            non_operation_fields = {}
+            for key, value in path_item.items():
+                if key.lower() in _HTTP_METHODS and isinstance(value, dict):
+                    if set(value.get("tags", [])) & allowed_tags:
+                        allowed_operations[key] = value
+                else:
+                    non_operation_fields[key] = value
+            if allowed_operations:
+                filtered[path] = {**non_operation_fields, **allowed_operations}
+        return filtered
+
     def _filter_openapi_schema(
-        self, schema: dict[str, Any], username: str
-    ) -> dict[str, Any]:
+        self, schema: Dict[str, Any], username: str
+    ) -> Dict[str, Any]:
         """
-        Filter OpenAPI paths, component schemas, and top-level tags for a user.
+        Filter OpenAPI paths, webhooks, component schemas, and top-level tags
+        for a user.
+
         Users omitted from user_tags or mapped to None receive the full schema.
         """
         allowed_tags = self.user_tags.get(username)
@@ -201,48 +402,25 @@ class DocShield:
 
         # Deep copy so we never mutate FastAPI's cached app.openapi() schema
         filtered_schema = copy.deepcopy(schema)
-        http_methods = {
-            "get",
-            "put",
-            "post",
-            "delete",
-            "options",
-            "head",
-            "patch",
-            "trace",
-        }
 
-        # 1. Filter paths by allowed tags (untagged routes are excluded)
-        filtered_paths: dict[str, Any] = {}
-        for path, path_item in filtered_schema.get("paths", {}).items():
-            if not isinstance(path_item, dict):
-                continue
+        # 1. Filter paths and webhooks by allowed tags
+        visible: List[Any] = []
+        for section in ("paths", "webhooks"):
+            if isinstance(filtered_schema.get(section), dict):
+                filtered_schema[section] = self._filter_path_items(
+                    filtered_schema[section], allowed_tags
+                )
+                visible.append(filtered_schema[section])
 
-            allowed_operations = {}
-            non_operation_fields = {}
-
-            for key, value in path_item.items():
-                if key.lower() in http_methods and isinstance(value, dict):
-                    route_tags = set(value.get("tags", []))
-                    if route_tags & allowed_tags:
-                        allowed_operations[key] = value
-                else:
-                    non_operation_fields[key] = value
-
-            if allowed_operations:
-                filtered_paths[path] = {**non_operation_fields, **allowed_operations}
-
-        filtered_schema["paths"] = filtered_paths
-
-        # 2. Prune components.schemas to only models referenced by visible paths
-        # (including nested refs)
+        # 2. Prune components.schemas to only models referenced by what is
+        # still visible (including nested refs)
         components = filtered_schema.get("components")
         if isinstance(components, dict) and isinstance(components.get("schemas"), dict):
             all_schemas = components["schemas"]
-            pending: set[str] = set()
-            self._collect_schema_refs(filtered_paths, pending)
+            pending: Set[str] = set()
+            self._collect_schema_refs(visible, pending)
 
-            used_schemas: set[str] = set()
+            used_schemas: Set[str] = set()
             while pending:
                 schema_name = pending.pop()
                 if schema_name in used_schemas or schema_name not in all_schemas:
@@ -257,7 +435,7 @@ class DocShield:
             }
 
         # 3. Filter top-level tags metadata if present
-        if "tags" in filtered_schema and isinstance(filtered_schema["tags"], list):
+        if isinstance(filtered_schema.get("tags"), list):
             filtered_schema["tags"] = [
                 tag
                 for tag in filtered_schema["tags"]
@@ -266,287 +444,193 @@ class DocShield:
 
         return filtered_schema
 
+    def _openapi_schema(self, request: Request, username: str) -> Dict[str, Any]:
+        """Build the OpenAPI schema for one request, the way FastAPI does."""
+        schema = self.app.openapi()
+        root_path = _root_path(request)
+        if root_path and getattr(self.app, "root_path_in_servers", True):
+            servers = schema.get("servers", [])
+            if root_path not in {server.get("url") for server in servers}:
+                schema = dict(schema)
+                schema["servers"] = [{"url": root_path}] + servers
+        return self._filter_openapi_schema(schema, username)
+
+    # --- Documentation pages ------------------------------------------------
+
+    def _local_url(self, request: Request, url: str) -> str:
+        """Put the app's root path in front of a URL that this app serves."""
+        if url.startswith(STATIC_URL_PREFIX):
+            return _root_path(request) + url
+        return url
+
+    def _swagger_assets(self) -> Tuple[List[str], List[str]]:
+        """The Swagger UI script and stylesheet URLs, in the order to try them."""
+        if self.swagger_js_url is not None or self.swagger_css_url is not None:
+            return (
+                [self.swagger_js_url or SWAGGER_JS_CDN_URL],
+                [self.swagger_css_url or SWAGGER_CSS_CDN_URL],
+            )
+        if self.static_handler and self.prefer_local:
+            js_url, css_url = self.static_handler.get_swagger_urls(prefer_local=True)
+            return [js_url], [css_url]
+        if self.static_handler and self.use_cdn_fallback:
+            return (
+                [SWAGGER_JS_CDN_URL, SWAGGER_JS_LOCAL_URL],
+                [SWAGGER_CSS_CDN_URL, SWAGGER_CSS_LOCAL_URL],
+            )
+        return [SWAGGER_JS_CDN_URL], [SWAGGER_CSS_CDN_URL]
+
+    def _redoc_assets(self) -> List[str]:
+        """The ReDoc script URLs, in the order to try them."""
+        if self.redoc_js_url is not None:
+            return [self.redoc_js_url]
+        if self.static_handler and self.prefer_local:
+            return [self.static_handler.get_redoc_url(prefer_local=True)]
+        if self.static_handler and self.use_cdn_fallback:
+            return [REDOC_JS_CDN_URL, REDOC_JS_LOCAL_URL]
+        return [REDOC_JS_CDN_URL]
+
+    def _page(
+        self, request: Request, template: str, title: str, values: Dict[str, str]
+    ) -> str:
+        """Render a documentation page with the parts both pages share."""
+        custom_style = (
+            f'<style id="docshield-custom-css">{self.custom_css}</style>'
+            if self.custom_css
+            else ""
+        )
+        logout_link = ""
+        if self.auth_method == "form":
+            logout_url = html.escape(_root_path(request) + self.logout_url)
+            logout_link = _templates.render(
+                _templates.LOGOUT_LINK, {"LOGOUT_URL": logout_url}
+            )
+        shared = {
+            "TITLE": html.escape(f"{self.app.title} - {title}"),
+            "CUSTOM_STYLE": custom_style,
+            "LOGOUT_LINK": logout_link,
+            "LOADER": _templates.LOADER_SCRIPT,
+            "CUSTOM_JS": self.custom_js or "// No custom JS",
+        }
+        return _templates.render(template, {**shared, **values})
+
+    def _swagger_html(self, request: Request) -> str:
+        """Render the Swagger UI page."""
+        root_path = _root_path(request)
+        js_urls, css_urls = self._swagger_assets()
+        config = dict(_SWAGGER_UI_DEFAULTS)
+        config.update(getattr(self.app, "swagger_ui_parameters", None) or {})
+        config["url"] = root_path + self.openapi_url
+        oauth2_redirect_url = (
+            root_path + self._oauth2_redirect_url if self._oauth2_redirect_url else None
+        )
+        values = {
+            "JS_URLS": _js([self._local_url(request, url) for url in js_urls]),
+            "CSS_URLS": _js([self._local_url(request, url) for url in css_urls]),
+            "CONFIG": _js(config),
+            "OAUTH2_REDIRECT_URL": _js(oauth2_redirect_url),
+            "INIT_OAUTH": _js(getattr(self.app, "swagger_ui_init_oauth", None)),
+        }
+        return self._page(request, _templates.SWAGGER_PAGE, "Swagger UI", values)
+
+    def _redoc_html(self, request: Request) -> str:
+        """Render the ReDoc page."""
+        values = {
+            "JS_URLS": _js(
+                [self._local_url(request, url) for url in self._redoc_assets()]
+            ),
+            "OPENAPI_URL": html.escape(_root_path(request) + self.openapi_url),
+        }
+        return self._page(request, _templates.REDOC_PAGE, "ReDoc", values)
+
+    # --- Routes ---------------------------------------------------------------
+
     def _setup_routes(self) -> None:
-        """
-        Set up all protected documentation endpoints.
+        """Set up all protected documentation endpoints."""
+        app = self.app
 
-        Uses the stored swagger_js_url, swagger_css_url, and redoc_js_url.
-        """
-
-        # Set up OpenAPI JSON endpoint
-        @self.app.get(self.openapi_url, include_in_schema=False)
-        async def get_openapi(
-            credentials: HTTPBasicCredentials = Depends(self.security),
-        ):
-            username = self._verify_credentials(credentials)
-            # Because we set app.openapi_url to None, we need to restore it temporarily
-            old_openapi_url = self.app.openapi_url
-            self.app.openapi_url = self.openapi_url
-            openapi_schema = self.app.openapi()
-            self.app.openapi_url = old_openapi_url
-            return self._filter_openapi_schema(openapi_schema, username)
+        @app.get(self.openapi_url, include_in_schema=False)
+        async def get_openapi(request: Request):
+            username = self._authenticate(request)
+            if username is None:
+                raise self._unauthorized()
+            return JSONResponse(
+                self._openapi_schema(request, username), headers=NO_STORE
+            )
 
         # Set up Swagger UI endpoint if the original app had it
         if self.original_docs_url is not None:
 
-            @self.app.get(self.docs_url, include_in_schema=False)
-            async def get_docs(
-                credentials: HTTPBasicCredentials = Depends(self.security),
-            ):
-                self._verify_credentials(credentials)
+            @app.get(self.docs_url, include_in_schema=False)
+            async def get_docs(request: Request):
+                if self._authenticate(request) is None:
+                    return self._login_required(request, self.docs_url)
+                return HTMLResponse(self._swagger_html(request), headers=NO_STORE)
 
-                # Determine which URLs to use
-                if self.swagger_js_url is not None or self.swagger_css_url is not None:
-                    # User provided custom URLs, use them
-                    kwargs = {
-                        "openapi_url": self.openapi_url,
-                        "title": self.app.title + " - Swagger UI",
-                    }
-                    if self.swagger_js_url is not None:
-                        kwargs["swagger_js_url"] = self.swagger_js_url
-                    if self.swagger_css_url is not None:
-                        kwargs["swagger_css_url"] = self.swagger_css_url
-                elif self.static_handler and self.prefer_local:
-                    # Prefer local files
-                    js_url, css_url = self.static_handler.get_swagger_urls(
-                        prefer_local=True
-                    )
-                    kwargs = {
-                        "openapi_url": self.openapi_url,
-                        "title": self.app.title + " - Swagger UI",
-                        "swagger_js_url": js_url,
-                        "swagger_css_url": css_url,
-                    }
-                elif self.static_handler and self.use_cdn_fallback:
-                    # Use CDN with fallback support
-                    return self._get_swagger_with_fallback()
-                else:
-                    # Default behavior - use CDN
-                    kwargs = {
-                        "openapi_url": self.openapi_url,
-                        "title": self.app.title + " - Swagger UI",
-                    }
+            if self._oauth2_redirect_url:
 
-                # If custom CSS/JS provided and not using fallback mode, wrap the response
-                if self.custom_css or self.custom_js:
-                    html_content = get_swagger_ui_html(**kwargs).body.decode("utf-8")
-                    return HTMLResponse(
-                        self._inject_custom_code(html_content, is_swagger=True)
-                    )
-
-                return get_swagger_ui_html(**kwargs)
+                @app.get(self._oauth2_redirect_url, include_in_schema=False)
+                async def get_swagger_oauth2_redirect():
+                    return get_swagger_ui_oauth2_redirect_html()
 
         # Set up ReDoc endpoint if the original app had it
         if self.original_redoc_url is not None:
 
-            @self.app.get(self.redoc_url, include_in_schema=False)
-            async def get_redoc(
-                credentials: HTTPBasicCredentials = Depends(self.security),
-            ):
-                self._verify_credentials(credentials)
+            @app.get(self.redoc_url, include_in_schema=False)
+            async def get_redoc(request: Request):
+                if self._authenticate(request) is None:
+                    return self._login_required(request, self.redoc_url)
+                return HTMLResponse(self._redoc_html(request), headers=NO_STORE)
 
-                # Determine which URL to use
-                if self.redoc_js_url is not None:
-                    # User provided custom URL, use it
-                    kwargs = {
-                        "openapi_url": self.openapi_url,
-                        "title": self.app.title + " - ReDoc",
-                        "redoc_js_url": self.redoc_js_url,
-                    }
-                elif self.static_handler and self.prefer_local:
-                    # Prefer local files
-                    js_url = self.static_handler.get_redoc_url(prefer_local=True)
-                    kwargs = {
-                        "openapi_url": self.openapi_url,
-                        "title": self.app.title + " - ReDoc",
-                        "redoc_js_url": js_url,
-                    }
-                elif self.static_handler and self.use_cdn_fallback:
-                    # Use CDN with fallback support
-                    return self._get_redoc_with_fallback()
-                else:
-                    # Default behavior - use CDN
-                    kwargs = {
-                        "openapi_url": self.openapi_url,
-                        "title": self.app.title + " - ReDoc",
-                    }
+        if self.auth_method == "form":
+            self._setup_login_routes()
 
-                # If custom CSS/JS provided and not using fallback mode, wrap the response
-                if self.custom_css or self.custom_js:
-                    html_content = get_redoc_html(**kwargs).body.decode("utf-8")
-                    return HTMLResponse(
-                        self._inject_custom_code(html_content, is_swagger=False)
-                    )
+    def _setup_login_routes(self) -> None:
+        """Set up the login page and the logout URL for form login."""
+        app = self.app
 
-                return get_redoc_html(**kwargs)
+        @app.get(self.login_url, include_in_schema=False)
+        async def get_login(request: Request):
+            target = self._login_target(request.query_params.get("next"))
+            if self._authenticate(request) is not None:
+                return RedirectResponse(
+                    _root_path(request) + target, status_code=status.HTTP_303_SEE_OTHER
+                )
+            return self._login_page(request, target)
 
-    def _get_swagger_with_fallback(self) -> HTMLResponse:
-        """Generate Swagger UI HTML with automatic CDN fallback."""
-        custom_styles = (
-            f"""
-        <style>
-            {self.custom_css if self.custom_css else ""}
-        </style>
-        """
-            if self.custom_css
-            else ""
-        )
+        @app.post(self.login_url, include_in_schema=False)
+        async def post_login(request: Request):
+            body = await request.body()
+            form = (
+                parse_qs(body.decode("utf-8", "replace"))
+                if len(body) <= _MAX_LOGIN_BODY
+                else {}
+            )
+            username = form.get("username", [""])[0]
+            password = form.get("password", [""])[0]
+            target = self._login_target(form.get("next", [None])[0])
+            if not self._password_matches(username, password):
+                return self._login_page(request, target, failed=True)
 
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <title>{self.app.title} - Swagger UI</title>
-        <link rel="shortcut icon" href="https://fastapi.tiangolo.com/img/favicon.png">
-        <style>
-            body {{ margin: 0; }}
-            #swagger-ui {{ display: flex; flex-direction: column; height: 100vh; }}
-        </style>
-        {custom_styles}
-        </head>
-        <body>
-        <div id="swagger-ui"></div>
+            response = RedirectResponse(
+                _root_path(request) + target, status_code=status.HTTP_303_SEE_OTHER
+            )
+            response.set_cookie(
+                SESSION_COOKIE_NAME,
+                self._create_session(username),
+                max_age=self.session_max_age,
+                path=_root_path(request) or "/",
+                secure=request.url.scheme == "https",
+                httponly=True,
+                samesite="lax",
+            )
+            return response
 
-        <script>
-        var cdnFailed = false;
-
-        function loadSwaggerCSS() {{
-            return new Promise((resolve, reject) => {{
-                var link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css';
-                link.onload = resolve;
-                link.onerror = () => {{
-                    console.warn('CDN CSS failed, loading local Swagger CSS');
-                    var localLink = document.createElement('link');
-                    localLink.rel = 'stylesheet';
-                    localLink.href = '/docshield/static/swagger-ui.css';
-                    localLink.onload = resolve;
-                    localLink.onerror = reject;
-                    document.head.appendChild(localLink);
-                }};
-                document.head.appendChild(link);
-            }});
-        }}
-
-        function loadSwaggerJS() {{
-            return new Promise((resolve, reject) => {{
-                var script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js';
-                script.onload = resolve;
-                script.onerror = () => {{
-                    console.warn('CDN JS failed, loading local Swagger JS');
-                    cdnFailed = true;
-                    var localScript = document.createElement('script');
-                    localScript.src = '/docshield/static/swagger-ui-bundle.js';
-                    localScript.onload = resolve;
-                    localScript.onerror = reject;
-                    document.head.appendChild(localScript);
-                }};
-                document.head.appendChild(script);
-            }});
-        }}
-
-        Promise.all([loadSwaggerCSS(), loadSwaggerJS()]).then(() => {{
-            const ui = SwaggerUIBundle({{
-                url: '{self.openapi_url}',
-                dom_id: '#swagger-ui',
-                layout: 'BaseLayout',
-                deepLinking: true,
-                showExtensions: true,
-                showCommonExtensions: true,
-                presets: [
-                    SwaggerUIBundle.presets.apis,
-                    SwaggerUIBundle.SwaggerUIStandalonePreset
-                ],
-            }});
-            if (cdnFailed) {{
-                console.log('Documentation loaded using local fallback');
-            }}
-
-            // Custom JavaScript
-            {self.custom_js if self.custom_js else "// No custom JS"}
-        }}).catch(error => {{
-            console.error('Failed to load Swagger UI:', error);
-            document.getElementById('swagger-ui').innerHTML = '<h2>Failed to load documentation</h2>';
-        }});
-        </script>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=html_content)
-
-    def _get_redoc_with_fallback(self) -> HTMLResponse:
-        """Generate ReDoc HTML with automatic CDN fallback."""
-        custom_styles = (
-            f"""
-        <style>
-            {self.custom_css if self.custom_css else ""}
-        </style>
-        """
-            if self.custom_css
-            else ""
-        )
-
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <title>{self.app.title} - ReDoc</title>
-        <meta charset="utf-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
-        <style>
-            body {{ margin: 0; padding: 0; }}
-        </style>
-        {custom_styles}
-        </head>
-        <body>
-        <redoc spec-url="{self.openapi_url}"></redoc>
-
-        <script>
-        function loadReDoc() {{
-            return new Promise((resolve, reject) => {{
-                var script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js';
-                script.onload = resolve;
-                script.onerror = () => {{
-                    console.warn('CDN failed, loading local ReDoc');
-                    var localScript = document.createElement('script');
-                    localScript.src = '/docshield/static/redoc.standalone.js';
-                    localScript.onload = resolve;
-                    localScript.onerror = reject;
-                    document.head.appendChild(localScript);
-                }};
-                document.head.appendChild(script);
-            }});
-        }}
-
-        loadReDoc().then(() => {{
-            console.log('ReDoc loaded successfully');
-
-            // Custom JavaScript
-            {self.custom_js if self.custom_js else "// No custom JS"}
-        }}).catch(error => {{
-            console.error('Failed to load ReDoc:', error);
-            document.body.innerHTML = '<h2>Failed to load documentation</h2>';
-        }});
-        </script>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=html_content)
-
-    def _inject_custom_code(self, html: str, is_swagger: bool = True) -> str:
-        """Inject custom CSS and JavaScript into the HTML."""
-        if self.custom_css:
-            # Inject custom CSS before closing head tag
-            css_injection = f"<style>{self.custom_css}</style></head>"
-            html = html.replace("</head>", css_injection)
-
-        if self.custom_js:
-            # Inject custom JS before closing body tag
-            js_injection = f"<script>{self.custom_js}</script></body>"
-            html = html.replace("</body>", js_injection)
-
-        return html
+        @app.get(self.logout_url, include_in_schema=False)
+        async def get_logout(request: Request):
+            response = RedirectResponse(
+                _root_path(request) + self.login_url,
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+            response.delete_cookie(SESSION_COOKIE_NAME, path=_root_path(request) or "/")
+            return response
