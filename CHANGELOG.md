@@ -1,6 +1,6 @@
 # Changelog
 
-## Version 0.3.0 (2026-11-25)
+## Version 0.3.0 (2026-11-24)
 
 Everything that worked in 0.2.1 keeps working: the same arguments, the same URLs and the same default behavior.
 
